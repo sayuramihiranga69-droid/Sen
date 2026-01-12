@@ -1,5 +1,5 @@
 const { cmd } = require("../command");
-const { getSearch, getDetails, getDownload } = require('sinhalasub.lk');
+const sinhalasub = require('sinhalasub.lk'); // import whole module
 const NodeCache = require("node-cache");
 
 const cache = new NodeCache({ stdTTL: 1800, checkperiod: 600 }); // cache 30 min
@@ -20,7 +20,7 @@ cmd({
     let data = cache.get(cacheKey);
 
     if (!data) {
-      data = await getSearch(q);
+      data = await sinhalasub.getSearch(q); // use sinhalasub.getSearch
       cache.set(cacheKey, data);
     }
 
@@ -66,7 +66,7 @@ cmd({
   const movie = pending.movies[choice-1];
 
   try {
-    const details = await getDetails(movie.link);
+    const details = await sinhalasub.getDetails(movie.link); // fixed
     let msg = `🎬 *${details.result.title}*\n\n`;
     msg += `📅 ${details.result.year} | ⭐ ${details.result.rating}\n`;
     msg += `🎞 Categories: ${details.result.category.join(", ")}\n\n`;
