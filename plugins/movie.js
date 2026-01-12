@@ -2,7 +2,7 @@ const config = require('../config');
 const { cmd, commands } = require('../command');
 const axios = require('axios');
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
-const { fetchJson } = require('../lib/functions');
+const { fetchJson } = require('../lib/functions2');
 
 const apiKey = 'prabath_sk_5f6b6518b2aed4142f92d01f6c5f1026b88df3d3';
 
