@@ -1,205 +1,276 @@
-const { cmd } = require('../command');
+const config = require('../config');
+const { cmd, commands } = require('../command');
 const axios = require('axios');
+const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
+const { fetchJson } = require('../lib/functions');
 
-const API = "https://mapi-beta.vercel.app";
-const cineSession = {};
+const apiKey = 'prabath_sk_5f6b6518b2aed4142f92d01f6c5f1026b88df3d3';
 
-/* =========================
-   🔍 SEARCH MOVIE / TV
-========================= */
-cmd({
-  pattern: "movie",
-  alias: ["mv", "tv"],
-  react: "🎬",
-  category: "downloader",
-  filename: __filename
-}, async (conn, mek, m, { from, q, reply }) => {
+//=================== PRIME USERS LOADER ===================
+let primeUsers = [];
 
-  if (!q) return reply("❗ Example: .movie avatar");
-  reply("🔍 Searching...");
-
+async function loadPrimeUsers() {
   try {
-    const { data } = await axios.get(
-      `${API}/search?q=${encodeURIComponent(q)}`,
-      { timeout: 15000 }
-    );
-
-    if (!data?.results?.length) {
-      return reply("❌ No results found");
+    const res = await axios.get('https://raw.githubusercontent.com/sayuramihiranga69-droid/Data/refs/heads/main/prime_users.json');
+    const raw = res.data || {};
+    if (raw.numbers) {
+      primeUsers = raw.numbers.split(',').map(x => x.trim());
+      console.log('[✔️] Loaded prime users:', primeUsers);
     }
-
-    const rows = data.results.slice(0, 10).map(v => ({
-      title: v.title,
-      description: v.type === "tv" ? "📺 TV Series" : "🎬 Movie",
-      rowId: `cine_select|${encodeURIComponent(v.url)}`
-    }));
-
-    await conn.sendMessage(from, {
-      text: "🎬 *Search Results*",
-      footer: "CineSubz • Mr sayura",
-      title: "Select Movie / TV",
-      buttonText: "📂 Open List",
-      sections: [{ title: "Results", rows }]
-    }, { quoted: mek });
-
-  } catch (e) {
-    console.error("SEARCH ERROR:", e);
-    reply("❌ Search failed");
+  } catch (err) {
+    console.error('[❌] Failed loading prime users list:', err);
   }
-});
-
-/* =========================
-   📂 HANDLE LIST SELECTION
-========================= */
-cmd({ on: "message" }, async (conn, mek, m) => {
-  try {
-    const from = mek.key.remoteJid;
-
-    const listMsg = m.message?.listResponseMessage;
-    if (!listMsg) return;
-
-    const id = listMsg.singleSelectReply.selectedRowId;
-    if (!id) return;
-
-    /* 🎬 MOVIE / TV SELECT */
-    if (id.startsWith("cine_select|")) {
-      const url = decodeURIComponent(id.split("|")[1]);
-
-      const { data } = await axios.get(
-        `${API}/details?url=${encodeURIComponent(url)}`
-      );
-
-      // MOVIE
-      if (data.type !== "tv") {
-        return sendDetails(conn, mek, from, data);
-      }
-
-      // TV SERIES
-      const epRes = await axios.get(
-        `${API}/episodes?url=${encodeURIComponent(url)}`
-      );
-
-      cineSession[from] = {
-        episodes: epRes.data,
-        title: data.title,
-        poster: data.poster
-      };
-
-      const seasons = [...new Set(epRes.data.map(e => e.season || "Season 1"))];
-
-      const rows = seasons.map(s => ({
-        title: s,
-        description: "Season",
-        rowId: `cine_season|${s}`
-      }));
-
-      return conn.sendMessage(from, {
-        image: { url: data.poster },
-        caption: `📺 *${data.title}*\n\nSelect season`,
-        footer: "CineSubz",
-        title: "Seasons",
-        buttonText: "📂 Season List",
-        sections: [{ title: "Seasons", rows }]
-      }, { quoted: mek });
-    }
-
-    /* 📺 SEASON SELECT */
-    if (id.startsWith("cine_season|")) {
-      const season = id.split("|")[1];
-      const session = cineSession[from];
-      if (!session) return;
-
-      const eps = session.episodes.filter(
-        e => (e.season || "Season 1") === season
-      );
-
-      const rows = eps.map(e => ({
-        title: e.title,
-        description: season,
-        rowId: `cine_ep|${encodeURIComponent(e.url)}`
-      }));
-
-      return conn.sendMessage(from, {
-        text: `📂 *${season}*\nSelect episode`,
-        footer: "CineSubz",
-        title: "Episodes",
-        buttonText: "📂 Episode List",
-        sections: [{ title: "Episodes", rows }]
-      }, { quoted: mek });
-    }
-
-    /* 🎞 EPISODE SELECT */
-    if (id.startsWith("cine_ep|")) {
-      const epUrl = decodeURIComponent(id.split("|")[1]);
-      delete cineSession[from];
-
-      const { data } = await axios.get(
-        `${API}/details?url=${encodeURIComponent(epUrl)}`
-      );
-
-      return sendDetails(conn, mek, from, data);
-    }
-
-  } catch (e) {
-    console.error("LIST HANDLER ERROR:", e);
-  }
-});
-
-/* =========================
-   🎬 DETAILS + DOWNLOAD
-========================= */
-async function sendDetails(conn, mek, from, data) {
-  let caption = `🎬 *${data.title}*\n`;
-  if (data.release) caption += `📅 Release: ${data.release}\n`;
-  if (data.imdb) caption += `⭐ IMDb: ${data.imdb}\n`;
-  if (data.duration) caption += `⏱️ Duration: ${data.duration}\n`;
-  if (data.genre) caption += `🎭 Genre: ${data.genre.join(", ")}\n`;
-  if (data.description) caption += `\n📝 ${data.description}\n`;
-
-  const buttons = data.downloads.map(d => ({
-    buttonId: `cine_dl|${encodeURIComponent(d.url)}`,
-    buttonText: { displayText: `⬇️ ${d.quality} • ${d.size || "?"}` },
-    type: 1
-  }));
-
-  await conn.sendMessage(from, {
-    image: { url: data.poster },
-    caption: caption + "\n👇 Select quality",
-    footer: "CineSubz • Mr sayura",
-    buttons,
-    headerType: 4
-  }, { quoted: mek });
 }
 
-/* =========================
-   ⬇️ DOWNLOAD HANDLER
-========================= */
-cmd({ on: "button" }, async (conn, mek, m) => {
+// Load on start
+loadPrimeUsers();
+
+// Optional reload command
+cmd({
+  pattern: "reloadprime",
+  desc: "Reload prime users list",
+}, async (conn, m, { reply }) => {
+  await loadPrimeUsers();
+  await reply('*✅ Premium list reloaded!*');
+});
+
+//=========================================================================================================================
+// CINÉ COMMAND
+cmd({
+  pattern: "cine",
+  react: '🔎',
+  category: "movie",
+  alias: ["cinesubz"],
+  desc: "cinesubz.co movie search",
+  use: ".cine 2025",
+  filename: __filename
+},
+async (conn, m, mek, { from, q, prefix, isPre, isMe, reply }) => {
   try {
-    const from = mek.key.remoteJid;
-    const id = m.buttonId;
-    if (!id?.startsWith("cine_dl|")) return;
+    const pr = (await axios.get('https://raw.githubusercontent.com/sayuramihiranga69-droid/Data/refs/heads/main/main_var.json')).data;
+    const isFree = pr.mvfree === "true";
 
-    const pageUrl = decodeURIComponent(id.split("|")[1]);
-    await conn.sendMessage(from, { text: "⏳ Resolving download..." }, { quoted: mek });
+    const senderNum = m.sender.replace(/[^0-9]/g, "");
+    const isPremiumNumber = primeUsers.includes(senderNum);
 
-    const { data } = await axios.get(
-      `${API}/download?url=${encodeURIComponent(pageUrl)}`
-    );
-
-    if (!data?.download) {
-      return conn.sendMessage(from, { text: "❌ Download failed" }, { quoted: mek });
+    if (!isFree && !isMe && !isPre && !isPremiumNumber) {
+      await conn.sendMessage(from, { react: { text: '❌', key: mek.key } });
+      return await conn.sendMessage(from, {
+        text: "*`You are not a premium user⚠️`*\n\n" +
+              "*Send a message to one of the 2 numbers below and buy Lifetime premium 🫟.*\n\n" +
+              "_Price : 2000 LKR ✔️_\n\n" +
+              "*👨‍💻Contact us : 0743826406 , 0777145463*"
+      }, { quoted: mek });
     }
 
-    await conn.sendMessage(from, {
-      document: { url: data.download },
-      mimetype: "video/mp4",
-      fileName: "movie.mp4",
-      caption: "✅ Download started"
-    }, { quoted: mek });
+    if (!q) return await reply('*Please give me a movie name 🎬*');
+
+    const searchRes = await fetch('https://api.prabath.top/api/v1/cinesubz/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ "query": q })
+    }).then(res => res.json());
+
+    if (!searchRes.data || searchRes.data.length === 0) {
+      await conn.sendMessage(from, { react: { text: '❌', key: mek.key } });
+      return await conn.sendMessage(from, { text: '*No results found ❌*' }, { quoted: mek });
+    }
+
+    const rowss = searchRes.data.map((v) => ({
+      title: v.title.replace(/Sinhala Subtitles|සිංහල උපසිරැසි සමඟ/gi, "").trim(),
+      id: prefix + `cinedl ${v.link}`
+    }));
+
+    const listButtons = {
+      title: "Choose a Movie :)",
+      sections: [{ title: "Available Results", rows: rowss }]
+    };
+
+    const caption = `_*CINESUBZ MOVIE SEARCH RESULTS 🎬*_ \n\n*\`Input :\`* ${q}`;
+
+    if (config.BUTTON === "true") {
+      await conn.sendMessage(from, {
+        image: { url: config.LOGO },
+        caption: caption,
+        footer: config.FOOTER,
+        buttons: [{
+          buttonId: "movie_select",
+          buttonText: { displayText: "🎥 Select Movie" },
+          type: 4,
+          nativeFlowInfo: { name: "single_select", paramsJson: JSON.stringify(listButtons) }
+        }],
+        viewOnce: true
+      }, { quoted: mek });
+    } else {
+      let listMsg = caption + "\n\n";
+      searchRes.data.forEach((v, i) => {
+        listMsg += `*${i + 1}.* ${v.title}\n`;
+      });
+      await reply(listMsg);
+    }
 
   } catch (e) {
-    console.error("DOWNLOAD ERROR:", e);
+    console.log(e);
+    await conn.sendMessage(from, { text: '🚩 *Error !!*' }, { quoted: mek });
   }
 });
-                           
+
+//=========================================================================================================================
+// CINÉDL COMMAND
+cmd({
+  pattern: "cinedl",
+  react: '🎥',
+  desc: "movie info & quality selector",
+  filename: __filename
+},
+async (conn, m, mek, { from, q, prefix, reply }) => {
+  try {
+    if (!q || !q.includes('cinesubz')) {
+      return await reply('*❗ Invalid Link!*');
+    }
+
+    const movieRes = await fetch('https://api.prabath.top/api/v1/cinesubz/movie', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ "url": q })
+    }).then(res => res.json());
+
+    if (!movieRes.data) return await reply('🚩 *Could not fetch movie info!*');
+
+    const s = movieRes.data;
+    let msg = `*☘️ 𝗧ɪᴛʟᴇ ➮* *_${s.title}_*\n\n` +
+              `*📅 𝗥ᴇʟᴇꜱᴇᴅ ➮* _${s.date || 'N/A'}_\n` +
+              `*💃 𝗥ᴀᴛɪɴɢ ➮* _${s.imdb || 'N/A'}_\n` +
+              `*⏰ 𝗥ᴜɴᴛɪᴍᴇ ➮* _${s.runtime || 'N/A'}_\n` +
+              `*💁‍♂️ 𝗦ᴜʙᴛɪᴛʟᴇ ʙʏ ➮* _${s.subtitle_author || 'N/A'}_\n` +
+              `*🎭 𝗚ᴇɴᴀʀᴇꜱ ➮* ${s.genres ? s.genres.join(', ') : 'N/A'}\n`;
+
+    const rowss = movieRes.dl_links.map((v) => ({
+      title: `${v.quality} (${v.size})`,
+      id: prefix + `paka ${s.image}±${s.title}±${v.link}±${v.quality}`
+    }));
+
+    const listButtons = {
+      title: "🎬 Choose a download link:",
+      sections: [{ title: "Available Qualities", rows: rowss }]
+    };
+
+    if (config.BUTTON === "true") {
+      await conn.sendMessage(from, {
+        image: { url: s.image },
+        caption: msg,
+        footer: config.FOOTER,
+        buttons: [
+          {
+            buttonId: prefix + 'ctdetails ' + q,
+            buttonText: { displayText: "Details Send" },
+            type: 1
+          },
+          {
+            buttonId: "dl_select",
+            buttonText: { displayText: "🎥 Select Quality" },
+            type: 4,
+            nativeFlowInfo: { name: "single_select", paramsJson: JSON.stringify(listButtons) }
+          }
+        ],
+        viewOnce: true
+      }, { quoted: mek });
+    } else {
+      await reply(msg + "\n\n*Quality links fetched. Please use buttons.*");
+    }
+
+  } catch (e) {
+    console.log(e);
+    await reply('🚩 *Error fetching movie details !!*');
+  }
+});
+
+//=========================================================================================================================
+// PAKA COMMAND
+let isUploadingg = false;
+
+cmd({
+  pattern: "paka",
+  react: "⬇️",
+  dontAddCommandList: true,
+  filename: __filename
+}, async (conn, mek, m, { from, q, reply }) => {
+  if (!q) return;
+  if (isUploadingg) return await reply('*A movie is already being uploaded. Please wait...* ⏳');
+
+  try {
+    const [img, title, dlLink, quality] = q.split("±");
+    isUploadingg = true;
+
+    await conn.sendMessage(from, { react: { text: '⏳', key: mek.key } });
+
+    const dlRes = await fetch('https://api.prabath.top/api/v1/cinesubz/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ "url": dlLink })
+    }).then(res => res.json());
+
+    const directLink = dlRes.data.direct || dlRes.data.gdrive2 || dlRes.data.pixeldrain;
+
+    if (!directLink) {
+      isUploadingg = false;
+      return await reply("*🚩 Link generation failed!*");
+    }
+
+    const up_mg = await conn.sendMessage(from, { text: '*Uploading your movie..⬆️*' });
+
+    await conn.sendMessage(config.JID || from, {
+      document: { url: directLink },
+      caption: `*🎬 Name :* ${title}\n*🌟 Quality :* ${quality}\n\n${config.FOOTER}`,
+      mimetype: "video/mp4",
+      fileName: `${title} (${quality}).mp4`,
+      jpegThumbnail: await (await fetch(img)).buffer()
+    });
+
+    await conn.sendMessage(from, { delete: up_mg.key });
+    await conn.sendMessage(from, { react: { text: '✔️', key: mek.key } });
+
+  } catch (error) {
+    console.error(error);
+    await reply("🚩 *Upload Failed!*");
+  } finally {
+    isUploadingg = false;
+  }
+});
+
+//=========================================================================================================================
+// CTDETAILS COMMAND
+cmd({
+  pattern: "ctdetails",
+  react: '🎥',
+  desc: "details card",
+  filename: __filename
+},
+async (conn, m, mek, { from, q, reply }) => {
+  try {
+    if (!q) return await reply('*Please provide a link!*');
+
+    const movieRes = await fetch('https://api.prabath.top/api/v1/cinesubz/movie', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ "url": q })
+    }).then(res => res.json());
+
+    const s = movieRes.data;
+    const details = (await axios.get('https://raw.githubusercontent.com/sayuramihiranga69-droid/Data/refs/heads/main/main_var.json')).data;
+
+    let msg = `*☘️ 𝗧ɪᴛʟᴇ ➮* *_${s.title}_*\n\n` +
+              `*📅 𝗥ᴇʟᴇꜱᴇᴅ ➮* _${s.date || 'N/A'}_\n` +
+              `*💃 𝗥ᴀᴛɪɴɢ ➮* _${s.imdb || 'N/A'}_\n` +
+              `*⏰ 𝗥ᴜɴᴛɪᴍᴇ ➮* _${s.runtime || 'N/A'}_\n` +
+              `*🎭 𝗚ᴇɴᴀʀᴇꜱ ➮* _${s.genres.join(', ')}_\n\n` +
+              `> 🌟 Follow us: *${details.chlink}*`;
+
+    await conn.sendMessage(config.JID || from, { image: { url: s.image }, caption: msg });
+    await conn.sendMessage(from, { react: { text: '✔️', key: mek.key } });
+
+  } catch (error) {
+    console.error(error);
+    await reply('🚩 *Error fetching details!*');
+  }
+});
