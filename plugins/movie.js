@@ -7,13 +7,23 @@ let isUploadinggg = false;
 // ===================== PREMIUM CHECK =====================
 async function isPremiumUser(userId) {
     try {
-        const { data } = await axios.get(
+        const res = await axios.get(
             'https://raw.githubusercontent.com/sayuramihiranga69-droid/Data/refs/heads/main/prime_users.json'
         );
+
+        let data = res.data;
+
+        // GitHub JSON එක structure check කරන්න
+        // මොකද සමහර විට { "users": [...] } හැටියට තියෙන්න පුළුවන්
+        if (data.users && Array.isArray(data.users)) data = data.users;
+
+        // Array එකක් නෙවෙයි නම් fail-safe
+        if (!Array.isArray(data)) return false;
+
         return data.includes(userId);
     } catch (e) {
         console.error("Premium check failed:", e);
-        return false; // Fail-safe: treat as non-premium
+        return false; // error case එකේ default false
     }
 }
 
