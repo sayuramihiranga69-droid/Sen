@@ -14,6 +14,7 @@
     "axios": "latest",
     "express": "latest",
     "fs-extra": "latest",
+    "sinhalasub.lk":"12.0.0-beta.0",
     "path": "latest",
     "node-fetch": "latest",
     "qrcode-terminal": "latest",
