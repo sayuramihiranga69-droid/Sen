@@ -1,116 +1,89 @@
-const { cmd } = require('../command');
-const axios = require('axios');
+const { cmd } = require("../command");
+const axios = require("axios");
+const NodeCache = require("node-cache");
 
-// ======== YOUR API KEY ========
-const SRIHUB_API = "dew_5H5Dbuh4v7NbkNRmI0Ns2u2ZK240aNnJ9lnYQXR9";
+const movieCache = new NodeCache({ stdTTL: 100 });
+const movieMap = new Map();
 
-// ======== SIMPLE CACHE ========
-global.movie_cache = global.movie_cache || {};
-
-// ================= MOVIE SEARCH =================
 cmd({
-    pattern: "movie",
-    desc: "Search & download movies",
-    category: "media",
-    react: "🎬",
-    filename: __filename
-}, async (conn, mek, m, { from, args, reply }) => {
-    try {
-        const query = args.join(" ").trim();
-        if (!query) return reply("🎬 *Usage:* `.movie venom`");
+  pattern: "cinet",
+  alias: ["cz"],
+  desc: "🎬 Sinhala Sub Movies (CineSubz)",
+  category: "media",
+  react: "🎥",
+  filename: __filename
+}, async (conn, mek, m, { from, q }) => {
+  if (!q) return conn.sendMessage(from, { text: "❌ Use: .cine <movie name>" }, { quoted: mek });
 
-        // --------------- SEARCH -------------------
-        const searchRes = await axios.get(
-            "https://api.srihub.store/movie/sinhalasub",
-            {
-                params: { apikey: SRIHUB_API, query },
-                timeout: 15000,
-                headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" }
-            }
-        );
+  try {
+    const searchUrl = `https://api.srihub.store/movie/cinesubz?apikey=dew_YyT0KDc2boHDasFlmZCqDcPoeDHReD20aYmEsm1G&q=${encodeURIComponent(q)}`;
+    const searchRes = await axios.get(searchUrl);
+    const list = searchRes.data?.result;
 
-        if (!searchRes.data || searchRes.data.success !== true || !Array.isArray(searchRes.data.result) || searchRes.data.result.length === 0) {
-            return reply("❌ Movie not found.");
+    if (!list?.length) return conn.sendMessage(from, { text: "❌ No results found." }, { quoted: mek });
+
+    let text = "🔢 Reply with movie number:\n\n";
+    list.forEach((m, i) => text += `*${i+1}.* ${m.title}\n`);
+
+    const sentMsg = await conn.sendMessage(from, { text: `🎬 *CINESUBZ SEARCH*\n\n${text}` }, { quoted: mek });
+
+    const listener = async (update) => {
+      const msg = update.messages?.[0];
+      if (!msg?.message?.extendedTextMessage) return;
+      const replyText = msg.message.extendedTextMessage.text.trim();
+      const repliedId = msg.message.extendedTextMessage.contextInfo?.stanzaId;
+
+      if (repliedId === sentMsg.key.id) {
+        const num = parseInt(replyText);
+        const selected = list[num-1];
+        if (!selected) return conn.sendMessage(from, { text: "*Invalid movie number.*" }, { quoted: msg });
+
+        await conn.sendMessage(from, { react: { text: "🎯", key: msg.key } });
+
+        // 🔗 Fetch movie download info
+        const movieUrl = `https://api.srihub.store/movie/cinesubzdl?apikey=dew_YyT0KDc2boHDasFlmZCqDcPoeDHReD20aYmEsm1G&url=${encodeURIComponent(selected.link)}`;
+        const movieRes = await axios.get(movieUrl);
+        const movie = movieRes.data?.result;
+        if (!movie?.downloadOptions?.length) return conn.sendMessage(from, { text: "❌ No download links." }, { quoted: msg });
+
+        const links = movie.downloadOptions[0].links;
+        let cap = `🎬 *${movie.title}*\n\n📥 Download Options:\n\n`;
+        links.forEach((d, i) => cap += `*${i+1}.* ${d.quality} — ${d.size}\n`);
+        cap += "\nReply with number to download.";
+
+        const infoMsg = await conn.sendMessage(from, { image: { url: movie.images?.[0] }, caption: cap }, { quoted: msg });
+        movieMap.set(infoMsg.key.id, { title: movie.title, downloads: links });
+      }
+
+      else if (movieMap.has(repliedId)) {
+        const { title, downloads } = movieMap.get(repliedId);
+        const num = parseInt(replyText);
+        const chosen = downloads[num-1];
+        if (!chosen) return conn.sendMessage(from, { text: "*Invalid quality number.*" }, { quoted: msg });
+
+        // ✅ Get direct URL
+        let directUrl = chosen.url;
+        if (directUrl.includes("pixeldrain.com")) {
+          const match = directUrl.match(/\/([A-Za-z0-9]+)$/);
+          if (match) directUrl = `https://pixeldrain.com/api/file/${match[1]}`;
         }
 
-        const moviePageUrl = searchRes.data.result[0].link;
+        const sizeGB = chosen.size.toLowerCase().includes("gb") ? parseFloat(chosen.size) : parseFloat(chosen.size)/1024;
+        if (sizeGB > 2) return conn.sendMessage(from, { text: `⚠️ File too large (${chosen.size})` }, { quoted: msg });
 
-        // --------------- DETAILS -------------------
-        const detailRes = await axios.get(
-            "https://api.srihub.store/movie/sinhalasubdl",
-            {
-                params: { apikey: SRIHUB_API, url: moviePageUrl },
-                timeout: 15000,
-                headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" }
-            }
-        );
+        await conn.sendMessage(from, { react: { text: "📥", key: msg.key } });
+        await conn.sendMessage(from, {
+          document: { url: directUrl },
+          mimetype: "video/mp4",
+          fileName: `${title} - ${chosen.quality}.mp4`,
+          caption: `🎬 *${title}*\n🎥 ${chosen.quality}\n\n> Powered by WHITESHADOW-MD`
+        }, { quoted: msg });
+      }
+    };
 
-        if (!detailRes.data || detailRes.data.success !== true) {
-            return reply("❌ Failed to fetch download links.");
-        }
+    conn.ev.on("messages.upsert", listener);
 
-        const movie = detailRes.data.result;
-        if (!movie || !Array.isArray(movie.downloads) || movie.downloads.length === 0) {
-            return reply("❌ No downloadable files found.");
-        }
-
-        // --------------- AUTO SD 480P FIRST -------------------
-        movie.downloads.sort((a, b) => {
-            if (a.quality.includes("480")) return -1;
-            if (b.quality.includes("480")) return 1;
-            return 0;
-        });
-
-        // --------------- CACHE -------------------
-        global.movie_cache[from] = {
-            title: movie.title || "Movie",
-            downloads: movie.downloads
-        };
-
-        // --------------- MENU -------------------
-        let caption = `🎬 *${movie.title}*\n\n`;
-        movie.downloads.forEach((d, i) => {
-            caption += `${i + 1} | ${d.quality} 📁\n`;
-        });
-        caption += `\nReply with a number (1–${movie.downloads.length})\n\n© POPKID MD`;
-
-        await conn.sendMessage(from, { image: { url: movie.poster }, caption }, { quoted: mek });
-
-    } catch (err) {
-        console.error("MOVIE ERROR:", err?.response?.data || err.message);
-        reply("⚠️ Movie service error. Try again later.");
-    }
-});
-
-// ================= QUALITY SELECTION =================
-cmd({ on: "text" }, async (conn, mek, m, { from, body }) => {
-    if (!global.movie_cache[from]) return;
-    if (body.startsWith(".") || body.startsWith("/")) return;
-
-    const index = parseInt(body.trim()) - 1;
-    const cache = global.movie_cache[from];
-
-    if (isNaN(index) || !cache.downloads[index]) return;
-
-    const selected = cache.downloads[index];
-
-    try {
-        await conn.sendMessage(from, { react: { text: "📥", key: mek.key } });
-
-        await conn.sendMessage(
-            from,
-            {
-                document: { url: selected.url },
-                mimetype: "video/mp4",
-                fileName: `${cache.title} (${selected.quality}).mp4`,
-                caption: `🎬 *${cache.title}*\nQuality: ${selected.quality}\n\n© POPKID MD`
-            },
-            { quoted: mek }
-        );
-
-    } catch (e) {
-        await conn.sendMessage(from, { text: "❌ Failed to send file." });
-    } finally {
-        delete global.movie_cache[from];
-    }
+  } catch (err) {
+    return conn.sendMessage(from, { text: `❌ Error: ${err.message}` }, { quoted: mek });
+  }
 });
