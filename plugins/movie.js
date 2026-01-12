@@ -1,7 +1,7 @@
-const config = require('../config')
-const { cmd } = require('../command')
-const axios = require('axios')
-const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args))
+const config = require('../config');
+const { cmd } = require('../command');
+const axios = require('axios');
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 // ================= GLOBAL =================
 let primeUsers = [];
@@ -34,12 +34,12 @@ function isPremiumUser(userId) {
   return primeUsers.includes(userId);
 }
 
-// ================= SINHALA SUB SEARCH (TEXT REPLY VERSION) =================
+// ================= SINHALA SUB SEARCH =================
 cmd({
     pattern: "sinhalasub",
     react: '🔎',
     category: "movie",
-    alias: ["sinsub", "sinhalasub"],
+    alias: ["sinsub"],
     desc: "Search movies on sinhalasub.lk",
     use: ".sinhalasub <movie name>",
     filename: __filename
@@ -83,5 +83,108 @@ cmd({
     } catch (e) {
         console.error("🔥 SinhalaSub Error:", e);
         reply('🚫 *Error Occurred !!*\n\n' + e.message);
+    }
+});
+
+// ================= SININFO MOVIE DETAILS =================
+cmd({
+    pattern: "sininfo",
+    alias: ["mdv"],
+    react: "🎥",
+    desc: "Movie details from sinhalasub.lk",
+    filename: __filename
+}, async (conn, mek, m, { from, q, reply }) => {
+    try {
+        if (!q) return reply('🚩 *Please give me a valid movie URL!*');
+
+        const { data } = await axios.get(`https://visper-md-ap-is.vercel.app/movie/sinhalasub/info?q=${encodeURIComponent(q)}`);
+        const sadas = data.result;
+        if (!sadas || Object.keys(sadas).length === 0) return reply('*🚫 No details found for this movie!*');
+
+        let msg = `*🌾 Title:* *_${sadas.title || 'N/A'}_*\n`;
+        msg += `*📅 Released:* _${sadas.date || 'N/A'}_\n`;
+        msg += `*🌎 Country:* _${sadas.country || 'N/A'}_\n`;
+        msg += `*💃 Rating:* _${sadas.rating || 'N/A'}_\n`;
+        msg += `*⏰ Runtime:* _${sadas.duration || 'N/A'}_\n`;
+        msg += `*🕵️ Subtitle By:* _${sadas.author || 'N/A'}_\n\n`;
+
+        if (sadas.downloadLinks && sadas.downloadLinks.length > 0) {
+            msg += "*Available Download Links:*\n";
+            sadas.downloadLinks.forEach((v, i) => {
+                msg += `${i+1}. ${v.size || 'N/A'} - ${v.quality || 'Unknown Quality'}\nLink: ${v.link}\n\n`;
+            });
+        }
+
+        await reply(msg);
+
+    } catch (e) {
+        console.error(e);
+        reply('🚫 *Error Occurred !!*\n\n' + e.message);
+    }
+});
+
+// ================= SEND MOVIE FILE =================
+cmd({
+    pattern: "sindl",
+    react: "⬇️",
+    dontAddCommandList: true,
+    filename: __filename
+}, async (conn, mek, m, { from, q, reply }) => {
+    if (isUploadingg) return reply('*A movie is already being uploaded. Please wait ⏳*');
+
+    try {
+        const [pix, imglink, title] = q.split("±");
+        if (!pix || !imglink || !title) return reply("⚠️ Invalid format. Use:\n`sindl link±img±title`");
+
+        const da = pix.split("https://pixeldrain.com/u/")[1];
+        if (!da) return reply("⚠️ Couldn’t extract Pixeldrain file ID.");
+
+        const fileUrl = `https://pixeldrain.com/api/file/${da}`;
+        isUploadingg = true;
+        conn.sendMessage(from, { text: '*Uploading your movie.. ⬆️*', quoted: mek });
+
+        await conn.sendMessage(from, {
+            document: { url: fileUrl },
+            mimetype: "video/mp4",
+            fileName: `🎬 ${title}.mp4`,
+            caption: `🎬 ${title}\n\n${config.NAME}\n\n${config.FOOTER}`
+        });
+
+        conn.sendMessage(from, { text: '*Movie sent successfully ✔*', quoted: mek });
+
+    } catch (e) {
+        reply('🚫 *Error Occurred !!*\n\n' + e.message);
+        console.error("sindl error:", e);
+    } finally {
+        isUploadingg = false;
+    }
+});
+
+// ================= MOVIE DETAILS SHORT =================
+cmd({
+    pattern: "daqt",
+    react: "🎥",
+    alias: ["mdv"],
+    filename: __filename
+}, async (conn, mek, m, { from, q, reply }) => {
+    try {
+        if (!q) return reply('🚩 *Please give me a valid movie URL!*');
+
+        const { data } = await axios.get(`https://visper-md-ap-is.vercel.app/movie/sinhalasub/info?q=${encodeURIComponent(q)}`);
+        const sadas = data.result;
+        if (!sadas || Object.keys(sadas).length === 0) return reply('*🚫 No details found for this movie!*');
+
+        let msg = `*🍿 Title:* *_${sadas.title || 'N/A'}_*\n`;
+        msg += `*📅 Released:* _${sadas.date || 'N/A'}_\n`;
+        msg += `*🌎 Country:* _${sadas.country || 'N/A'}_\n`;
+        msg += `*💃 Rating:* _${sadas.rating || 'N/A'}_\n`;
+        msg += `*⏰ Runtime:* _${sadas.duration || 'N/A'}_\n`;
+        msg += `*🕵️ Subtitle By:* _${sadas.author || 'N/A'}_`;
+
+        await reply(msg);
+
+    } catch (error) {
+        console.error('Error fetching movie:', error);
+        reply('🚫 *Error Occurred !!*\n\n' + error.message);
     }
 });
