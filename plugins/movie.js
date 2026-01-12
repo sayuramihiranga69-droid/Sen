@@ -6,9 +6,12 @@ const { fetchJson } = require('../lib/functions2');
 
 const apiKey = 'prabath_sk_5f6b6518b2aed4142f92d01f6c5f1026b88df3d3';
 
-//=================== PRIME USERS LOADER ===================
+//=================== GLOBAL ====================
 let primeUsers = [];
+global.lastSearch = global.lastSearch || {};
+let isUploadingg = false;
 
+//=================== LOAD PRIME USERS ====================
 async function loadPrimeUsers() {
   try {
     const res = await axios.get('https://raw.githubusercontent.com/sayuramihiranga69-droid/Data/refs/heads/main/prime_users.json');
@@ -21,8 +24,6 @@ async function loadPrimeUsers() {
     console.error('[❌] Failed loading prime users list:', err);
   }
 }
-
-// Load on start
 loadPrimeUsers();
 
 // Optional reload command
@@ -34,8 +35,7 @@ cmd({
   await reply('*✅ Premium list reloaded!*');
 });
 
-//=========================================================================================================================
-// CINÉ COMMAND
+//=================== CINÉ COMMAND ====================
 cmd({
   pattern: "cine",
   react: '🔎',
@@ -44,8 +44,7 @@ cmd({
   desc: "cinesubz.co movie search",
   use: ".cine 2025",
   filename: __filename
-},
-async (conn, m, mek, { from, q, prefix, isPre, isMe, reply }) => {
+}, async (conn, m, mek, { from, q, prefix, isPre, isMe, reply }) => {
   try {
     const pr = (await axios.get('https://raw.githubusercontent.com/sayuramihiranga69-droid/Data/refs/heads/main/main_var.json')).data;
     const isFree = pr.mvfree === "true";
@@ -57,8 +56,7 @@ async (conn, m, mek, { from, q, prefix, isPre, isMe, reply }) => {
       await conn.sendMessage(from, { react: { text: '❌', key: mek.key } });
       return await conn.sendMessage(from, {
         text: "*`You are not a premium user⚠️`*\n\n" +
-              "*Send a message to one of the 2 numbers below and buy Lifetime premium 🫟.*\n\n" +
-              "_Price : 2000 LKR ✔️_\n\n" +
+              "_Price : 2000 LKR ✔️_\n" +
               "*👨‍💻Contact us : 0743826406 , 0777145463*"
       }, { quoted: mek });
     }
@@ -76,22 +74,28 @@ async (conn, m, mek, { from, q, prefix, isPre, isMe, reply }) => {
       return await conn.sendMessage(from, { text: '*No results found ❌*' }, { quoted: mek });
     }
 
-    const rowss = searchRes.data.map((v) => ({
-      title: v.title.replace(/Sinhala Subtitles|සිංහල උපසිරැසි සමඟ/gi, "").trim(),
-      id: prefix + `cinedl ${v.link}`
-    }));
+    // Save results for this user
+    global.lastSearch[m.sender] = searchRes.data;
 
-    const listButtons = {
-      title: "Choose a Movie :)",
-      sections: [{ title: "Available Results", rows: rowss }]
-    };
-
-    const caption = `_*CINESUBZ MOVIE SEARCH RESULTS 🎬*_ \n\n*\`Input :\`* ${q}`;
+    // Build message
+    let listMsg = `_*CINESUBZ MOVIE SEARCH RESULTS 🎬*_ \n\n*\`Input :\`* ${q}\n\n`;
+    searchRes.data.forEach((v, i) => {
+      const titleClean = v.title.replace(/Sinhala Subtitles|සිංහල උපසිරැසි සමඟ/gi, "").trim();
+      listMsg += `*${i + 1}.* ${titleClean}\n`;
+    });
+    listMsg += `\n*Reply with the number of the movie to get download links*`;
 
     if (config.BUTTON === "true") {
+      const rowss = searchRes.data.map((v, i) => ({
+        title: v.title.replace(/Sinhala Subtitles|සිංහල උපසිරැසි සමඟ/gi, "").trim(),
+        id: prefix + `cinedl ${v.link}`
+      }));
+
+      const listButtons = { title: "Choose a Movie :)", sections: [{ title: "Available Results", rows: rowss }] };
+
       await conn.sendMessage(from, {
         image: { url: config.LOGO },
-        caption: caption,
+        caption: listMsg,
         footer: config.FOOTER,
         buttons: [{
           buttonId: "movie_select",
@@ -102,10 +106,6 @@ async (conn, m, mek, { from, q, prefix, isPre, isMe, reply }) => {
         viewOnce: true
       }, { quoted: mek });
     } else {
-      let listMsg = caption + "\n\n";
-      searchRes.data.forEach((v, i) => {
-        listMsg += `*${i + 1}.* ${v.title}\n`;
-      });
       await reply(listMsg);
     }
 
@@ -115,19 +115,33 @@ async (conn, m, mek, { from, q, prefix, isPre, isMe, reply }) => {
   }
 });
 
-//=========================================================================================================================
-// CINÉDL COMMAND
+//=================== NUMBER REPLY SELECTION ====================
+cmd({
+  pattern: /^\d+$/,
+  dontAddCommandList: true
+}, async (conn, m, mek, { from, prefix, reply }) => {
+  const num = parseInt(m.text);
+  const data = global.lastSearch?.[m.sender];
+  if (!data || !data[num - 1]) return;
+
+  const movieLink = data[num - 1].link;
+  await reply(`✅ Selected movie: ${data[num - 1].title}\nFetching details...`);
+
+  const cinedlCmd = commands.get('cinedl');
+  if (cinedlCmd) {
+    await cinedlCmd.callback(conn, m, mek, { from, q: movieLink, prefix, reply });
+  }
+});
+
+//=================== CINÉDL COMMAND ====================
 cmd({
   pattern: "cinedl",
   react: '🎥',
   desc: "movie info & quality selector",
   filename: __filename
-},
-async (conn, m, mek, { from, q, prefix, reply }) => {
+}, async (conn, m, mek, { from, q, prefix, reply }) => {
   try {
-    if (!q || !q.includes('cinesubz')) {
-      return await reply('*❗ Invalid Link!*');
-    }
+    if (!q || !q.includes('cinesubz')) return await reply('*❗ Invalid Link!*');
 
     const movieRes = await fetch('https://api.prabath.top/api/v1/cinesubz/movie', {
       method: 'POST',
@@ -150,10 +164,7 @@ async (conn, m, mek, { from, q, prefix, reply }) => {
       id: prefix + `paka ${s.image}±${s.title}±${v.link}±${v.quality}`
     }));
 
-    const listButtons = {
-      title: "🎬 Choose a download link:",
-      sections: [{ title: "Available Qualities", rows: rowss }]
-    };
+    const listButtons = { title: "🎬 Choose a download link:", sections: [{ title: "Available Qualities", rows: rowss }] };
 
     if (config.BUTTON === "true") {
       await conn.sendMessage(from, {
@@ -161,17 +172,8 @@ async (conn, m, mek, { from, q, prefix, reply }) => {
         caption: msg,
         footer: config.FOOTER,
         buttons: [
-          {
-            buttonId: prefix + 'ctdetails ' + q,
-            buttonText: { displayText: "Details Send" },
-            type: 1
-          },
-          {
-            buttonId: "dl_select",
-            buttonText: { displayText: "🎥 Select Quality" },
-            type: 4,
-            nativeFlowInfo: { name: "single_select", paramsJson: JSON.stringify(listButtons) }
-          }
+          { buttonId: prefix + 'ctdetails ' + q, buttonText: { displayText: "Details Send" }, type: 1 },
+          { buttonId: "dl_select", buttonText: { displayText: "🎥 Select Quality" }, type: 4, nativeFlowInfo: { name: "single_select", paramsJson: JSON.stringify(listButtons) } }
         ],
         viewOnce: true
       }, { quoted: mek });
@@ -185,10 +187,7 @@ async (conn, m, mek, { from, q, prefix, reply }) => {
   }
 });
 
-//=========================================================================================================================
-// PAKA COMMAND
-let isUploadingg = false;
-
+//=================== PAKA COMMAND ====================
 cmd({
   pattern: "paka",
   react: "⬇️",
@@ -211,7 +210,6 @@ cmd({
     }).then(res => res.json());
 
     const directLink = dlRes.data.direct || dlRes.data.gdrive2 || dlRes.data.pixeldrain;
-
     if (!directLink) {
       isUploadingg = false;
       return await reply("*🚩 Link generation failed!*");
@@ -238,15 +236,13 @@ cmd({
   }
 });
 
-//=========================================================================================================================
-// CTDETAILS COMMAND
+//=================== CTDETAILS COMMAND ====================
 cmd({
   pattern: "ctdetails",
   react: '🎥',
   desc: "details card",
   filename: __filename
-},
-async (conn, m, mek, { from, q, reply }) => {
+}, async (conn, m, mek, { from, q, reply }) => {
   try {
     if (!q) return await reply('*Please provide a link!*');
 
