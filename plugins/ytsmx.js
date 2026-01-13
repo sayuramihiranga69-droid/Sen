@@ -82,7 +82,7 @@ cmd({
                 message += `*${idx + 1}. ${dl.quality}* (${dl.size})\n`;
                 message += `🔗 ${dl.link}\n\n`;
             });
-            message += `━━━━━━━━━━━━━━━━━━━━━━\n\n📌 Use .cinedownload <link> to download`;
+            message += `━━━━━━━━━━━━━━━━━━━━━━\n\n📌 Use .cinedownload <link> to get Pixeldrain/Telegram links`;
         } else {
             message += `❌ No download links available.`;
         }
@@ -100,33 +100,39 @@ cmd({
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 3️⃣ DOWNLOAD COMMAND
+// 3️⃣ DOWNLOAD COMMAND (API fetch Pixeldrain/Telegram links)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 cmd({
     pattern: "cinedownload",
     alias: ["cinedl", "cdl"],
-    desc: "Download movie/episode from CineSubz/Pixeldrain links",
+    desc: "Fetch Pixeldrain/Telegram download links",
     category: "downloader",
     react: "📥",
     filename: __filename
 }, async (conn, mek, m, { from, q, reply }) => {
     try {
-        if (!q) return reply("❗ Please provide a download link\nExample: .cinedownload <link>");
+        if (!q) return reply("❗ Please provide a CineSubz download URL\nExample: .cinedownload <link>");
 
         let cleanUrl = q.trim();
 
-        // Sending direct link as document
-        await conn.sendMessage(from, {
-            document: { url: cleanUrl },
-            mimetype: "video/mp4",
-            fileName: `cinesubz_${Date.now()}.mp4`,
-            caption: `✅ Downloaded via CineSubz API`
-        }, { quoted: mek });
+        const apiUrl = `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-download?url=${encodeURIComponent(cleanUrl)}&apikey=deb4e2d4982c6bc2`;
+        const { data } = await axios.get(apiUrl);
 
-        reply("✅ Download command executed. File should start sending shortly.");
+        if (!data.status || !data.data || !data.data.download || data.data.download.length === 0) {
+            return reply("❌ Failed to fetch download links.");
+        }
+
+        let message = `📥 *Download Links for ${data.data.title}*\n\n`;
+        data.data.download.forEach((dl, idx) => {
+            message += `*${idx + 1}. ${dl.name.toUpperCase()}* → ${dl.url}\n\n`;
+        });
+
+        message += `━━━━━━━━━━━━━━━━━━━━━━\n\n📌 Use your browser or Telegram to download the file.`;
+
+        await conn.sendMessage(from, { text: message }, { quoted: mek });
 
     } catch (e) {
-        console.error("Download error:", e);
-        reply(`❌ Download failed: ${e.message}`);
+        console.error("Download API error:", e);
+        reply(`❌ Failed to fetch download links: ${e.message}`);
     }
 });
