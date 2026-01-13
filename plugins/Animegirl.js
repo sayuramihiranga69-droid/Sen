@@ -1,5 +1,5 @@
 const axios = require("axios");
-const { cmd } = require("../lib/command");
+const { cmd } = require("../command");
 
 cmd({
   pattern: "baiscopes",
