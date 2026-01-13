@@ -1,123 +1,164 @@
-const { cmd } = require('../command');
-const axios = require('axios');
+// ===============================
+// 📌 SINHALA SUB MOVIE SEARCH PLUGIN
+// ===============================
 
-const CREATOR = "Vajira";
+const axios = require("axios");
 
-cmd({
-  pattern: "sinhalasubk",
-  alias: ["ssubk", "sinhala"],
-  desc: "Search SinhalaSub Movies + Info + Direct Download Links",
+module.exports = {
+  name: "sinhalasubk",
+  alias: ["ssub", "sinhala"],
+  desc: "Search SinhalaSub Movies + Info + Download",
   category: "movie",
+  usage: ".sinhalasubk <movie name>",
   react: "🎬",
-  filename: __filename
-}, async (conn, mek, m, { from, q, reply }) => {
-  try {
-    if (!q) return reply("❗ Please provide a movie name\nExample: .sinhalasubk Titanic");
 
-    await reply("🕵️ Searching SinhalaSub...");
+  start: async (sock, msg, { args, sender }) => {
+    try {
+      const q = args.join(" ");
+      if (!q)
+        return sock.sendMessage(msg.from, {
+          text: '❎ Please enter a movie name or year!\n\nExample: *.sinhalasubk Titanic*'
+        }, { quoted: msg });
 
-    const searchApi = `https://test-sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/search?q=${encodeURIComponent(q)}&apiKey=55ba0f3355fea54b6a032e8c5249c60f`;
-    const { data } = await axios.get(searchApi);
+      await sock.sendMessage(msg.from, { react: { text: "🕵️", key: msg.key } });
 
-    if (!data?.data || data.data.length === 0) return reply("❌ No SinhalaSub movies found!");
+      // 🔥 API KEY ADDED
+      const searchApi = `https://test-sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/search?q=${encodeURIComponent(q)}&apiKey=55ba0f3355fea54b6a032e8c5249c60f`;
+      const { data } = await axios.get(searchApi);
 
-    const results = data.data.slice(0, 3);
+      if (!data?.data || data.data.length === 0)
+        return sock.sendMessage(msg.from, { text: "❎ No SinhalaSub movies found!" }, { quoted: msg });
 
-    let caption = `🎬 *Top results for:* ${q}\n\n`;
-    results.forEach((movie, i) => {
-      caption += `*${i + 1}. ${movie.Title}* (${movie.Year})\n`;
-    });
-    caption += `\nReply with number (1-${results.length}) to see details & download links.`;
+      const results = data.data.slice(0, 3);
 
-    const sentMsg = await conn.sendMessage(from, {
-      image: { url: results[0].Img },
-      caption
-    }, { quoted: mek });
+      let caption = `🎬 *Top results for:* ${q}\n\n`;
+      results.forEach((movie, i) => {
+        caption += `*${i + 1}. ${movie.Title}* (${movie.Year})\n`;
+      });
 
-    // ──────────────── LISTENER ────────────────
-    const listener = async (update) => {
-      const m2 = update.messages[0];
-      if (!m2.message) return;
+      caption += `\nReply with number (1-${results.length}) to see details & download links.`;
 
-      const text = m2.message.conversation || m2.message.extendedTextMessage?.text;
-      const isReply = m2.message.extendedTextMessage &&
-                      m2.message.extendedTextMessage.contextInfo?.stanzaId === sentMsg.key.id;
+      const sentMsg = await sock.sendMessage(msg.from, {
+        image: { url: results[0].Img },
+        caption
+      }, { quoted: msg });
 
-      if (isReply && ["1","2","3"].includes(text)) {
-        const index = parseInt(text) - 1;
-        const selected = results[index];
+      // ==========================
+      // MOVIE SELECT LISTENER
+      // ==========================
+      const listener = async (update) => {
+        const m = update.messages[0];
+        if (!m.message) return;
 
-        await conn.sendMessage(from, { react: { text: "⏳", key: m2.key } });
+        const text = m.message.conversation || m.message.extendedTextMessage?.text;
+        const isReply =
+          m.message.extendedTextMessage &&
+          m.message.extendedTextMessage.contextInfo?.stanzaId === sentMsg.key.id;
 
-        try {
-          const infoApi = `https://test-sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/infodl?q=${selected.Link}&apiKey=55ba0f3355fea54b6a032e8c5249c60f`;
-          const { data } = await axios.get(infoApi);
-          const movie = data?.data;
-          if (!movie) return reply("❌ Movie info not found!");
+        if (isReply && ["1", "2", "3"].includes(text)) {
+          const index = parseInt(text) - 1;
+          const selected = results[index];
 
-          let msgText = `🎬 *${movie.title}*\n\n`;
-          msgText += `📅 Year: ${movie.date}\n🌍 Country: ${movie.country}\n⭐ Rating: ${movie.rating}\n💬 Subtitles: ${movie.subtitles}\n\n`;
-          msgText += `📖 ${movie.description}\n\n`;
-          msgText += `*💬 Download Options:*\n`;
+          await sock.sendMessage(msg.from, { react: { text: "⏳", key: m.key } });
 
-          movie.downloadLinks.slice(0, 5).forEach((dl, i) => {
-            msgText += `${i + 1}️⃣ ${dl.quality} (${dl.size})\n`;
-          });
+          try {
+            // 🔥 API KEY ADDED
+            const infoApi = `https://test-sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/infodl?q=${selected.Link}&apiKey=55ba0f3355fea54b6a032e8c5249c60f`;
+            const { data } = await axios.get(infoApi);
 
-          const infoMsg = await conn.sendMessage(from, {
-            image: { url: movie.images[0] },
-            caption: msgText
-          }, { quoted: m2 });
+            const movie = data?.data;
+            if (!movie)
+              return sock.sendMessage(msg.from, { text: "❎ Info not found." }, { quoted: m });
 
-          // ──────────────── DOWNLOAD LINKS ────────────────
-          const dlListener = async (dlUpdate) => {
-            const d = dlUpdate.messages[0];
-            if (!d.message) return;
+            let desc = `🎬 *${movie.title}* | සිංහල උපසිරසි සමඟ\n\n`;
+            desc += `📅 Year: ${movie.date}\n🌍 Country: ${movie.country}\n⭐ Rating: ${movie.rating}\n💬 Subtitles: ${movie.subtitles}\n\n`;
+            desc += `📖 ${movie.description}\n\n`;
+            desc += `*💬 Download Options:*\n`;
 
-            const text2 = d.message.conversation || d.message.extendedTextMessage?.text;
-            const isReply2 = d.message.extendedTextMessage &&
-                             d.message.extendedTextMessage.contextInfo?.stanzaId === infoMsg.key.id;
+            // 🔥 SHOW ALL DOWNLOAD LINKS
+            movie.downloadLinks.forEach((dl, i) => {
+              desc += `${i + 1}️⃣ ║❯❯ ${dl.quality} (${dl.size})\n`;
+            });
 
-            if (isReply2 && ["1","2","3","4","5"].includes(text2)) {
-              const dlIndex = parseInt(text2) - 1;
-              const dlObj = movie.downloadLinks[dlIndex];
-              if (!dlObj) return reply("❌ Invalid option", from, { quoted: d });
+            const infoMsg = await sock.sendMessage(msg.from, {
+              image: { url: movie.images[0] },
+              caption: desc
+            }, { quoted: m });
 
-              let finalLink = dlObj.link;
+            await sock.sendMessage(msg.from, { react: { text: "🎬", key: m.key } });
 
-              // PixelDrain
-              if (finalLink.includes("pixeldrain.com")) {
-                const fileId = finalLink.split("/u/")[1];
-                finalLink = `https://pixeldrain.com/api/file/${fileId}`;
+            // ==========================
+            // DOWNLOAD LISTENER
+            // ==========================
+            const dlListener = async (dlUpdate) => {
+              const d = dlUpdate.messages[0];
+              if (!d.message) return;
+
+              const text2 = d.message.conversation || d.message.extendedTextMessage?.text;
+              const isReply2 =
+                d.message.extendedTextMessage &&
+                d.message.extendedTextMessage.contextInfo?.stanzaId === infoMsg.key.id;
+
+              if (isReply2) {
+                const dlIndex = parseInt(text2) - 1;
+                const dlObj = movie.downloadLinks[dlIndex];
+
+                if (!dlObj)
+                  return sock.sendMessage(msg.from, { text: "❎ Invalid download option." }, { quoted: d });
+
+                await sock.sendMessage(msg.from, { react: { text: "⬇️", key: d.key } });
+
+                try {
+                  let finalLink = dlObj.link;
+
+                  // PixelDrain Fix
+                  if (finalLink.includes("pixeldrain.com")) {
+                    const fileId = finalLink.split("/u/")[1];
+                    finalLink = `https://pixeldrain.com/api/file/${fileId}`;
+                  }
+
+                  // Google Drive Fix
+                  if (finalLink.includes("drive.google.com")) {
+                    const fileId = finalLink.match(/[-\w]{25,}/)?.[0];
+                    finalLink = `https://drive.google.com/uc?export=download&id=${fileId}`;
+                  }
+
+                  await sock.sendMessage(msg.from, {
+                    document: { url: finalLink },
+                    mimetype: "video/mp4",
+                    fileName: `${movie.title} (${dlObj.quality}).mp4`,
+                    caption: `🎬 *${movie.title}*\n💿 Quality: ${dlObj.quality}\n📦 Size: ${dlObj.size}`
+                  }, { quoted: d });
+
+                  await sock.sendMessage(msg.from, { react: { text: "✅", key: d.key } });
+
+                } catch (err) {
+                  await sock.sendMessage(msg.from, { react: { text: "❌", key: d.key } });
+                  await sock.sendMessage(msg.from, {
+                    text: `❌ Download failed!\n\nDirect link:\n${finalLink}`
+                  }, { quoted: d });
+                }
+
+                sock.ev.off("messages.upsert", dlListener);
               }
+            };
 
-              // Google Drive
-              if (finalLink.includes("drive.google.com")) {
-                const fileId = finalLink.match(/[-\w]{25,}/)?.[0];
-                finalLink = `https://drive.google.com/uc?export=download&id=${fileId}`;
-              }
+            sock.ev.on("messages.upsert", dlListener);
+            sock.ev.off("messages.upsert", listener);
 
-              await conn.sendMessage(from, {
-                text: `✅ Download Link Ready:\n\n${finalLink}`
-              }, { quoted: d });
-
-              conn.ev.off("messages.upsert", dlListener);
-            }
-          };
-
-          conn.ev.on("messages.upsert", dlListener);
-          conn.ev.off("messages.upsert", listener);
-
-        } catch (err) {
-          await reply(`❌ Error: ${err.message}`, from, { quoted: m2 });
-          conn.ev.off("messages.upsert", listener);
+          } catch (err) {
+            await sock.sendMessage(msg.from, { react: { text: "❌", key: m.key } });
+            await sock.sendMessage(msg.from, { text: `❌ Error: ${err.message}` }, { quoted: m });
+            sock.ev.off("messages.upsert", listener);
+          }
         }
-      }
-    };
+      };
 
-    conn.ev.on("messages.upsert", listener);
+      sock.ev.on("messages.upsert", listener);
 
-  } catch (err) {
-    await reply(`❌ ERROR: ${err.message}`, from, { quoted: mek });
+    } catch (err) {
+      await sock.sendMessage(msg.from, { react: { text: "❌", key: msg.key } });
+      await sock.sendMessage(msg.from, { text: `❌ ERROR: ${err.message}` }, { quoted: msg });
+    }
   }
-});
+};
