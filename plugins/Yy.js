@@ -4,7 +4,7 @@ const { fetchJson } = require('../lib/functions');
 const tharuzz_footer = "> Powerd by 𝙳𝙰𝚁𝙺-𝙺𝙽𝙸𝙶𝙷𝚃-𝚇𝙼𝙳";
 
 
-const { cmd } = require("../command");
+
 
 cmd({
   pattern: "save",
