@@ -1,5 +1,5 @@
-const { cmd } = require("../command");
-const axios = require("axios");
+const { cmd } = require('../command');
+const axios = require('axios');
 
 cmd({
   pattern: "sinhalasubk",
@@ -9,116 +9,78 @@ cmd({
   react: "🎬",
   filename: __filename
 },
-async (sock, mek, m, { from, q, reply }) => {
+async (conn, mek, m, { from, q, reply }) => {
   try {
-    if (!q) return reply("❎ Please enter a movie name!\nExample: .sinhalasubk Titanic");
+    if (!q) return reply(`❎ Please enter a movie name\n\nExample: .sinhalasubk Titanic`);
 
-    await sock.sendMessage(from, { react: { text: "🕵️", key: m.key } });
+    await reply("🕵️ Searching SinhalaSub...");
 
-    const searchApi = `https://test-sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/search?q=${encodeURIComponent(q)}&apiKey=55ba0f3355fea54b6a032e8c5249c60f`;
+    const searchApi = `https://sadaslk-apis.vercel.app/api/v1/movie/sublk/search?q=${encodeURIComponent(q)}&apiKey=a3b8844e3897880d75331c5b2526d701`;
     const { data } = await axios.get(searchApi);
 
     if (!data?.data || data.data.length === 0) return reply("❎ No SinhalaSub movies found!");
 
     const results = data.data.slice(0, 3);
 
-    let caption = `🎬 *Top results for:* ${q}\n\n`;
+    let message = `🎬 *Top results for:* ${q}\n\n`;
     results.forEach((movie, i) => {
-      caption += `*${i + 1}. ${movie.Title}* (${movie.Year})\n`;
+      message += `*${i + 1}. ${movie.title}* (${movie.releaseDate})\n`;
     });
-    caption += `\nReply with number (1-${results.length}) to see details & download links.`;
+    message += `\n*💬 Reply with number (1-${results.length}) to see details & download links.*`;
 
-    const sentMsg = await sock.sendMessage(from, {
-      image: { url: results[0].Img },
-      caption
-    }, { quoted: mek });
+    await conn.sendMessage(from, { image: { url: results[0].imageUrl }, caption: message }, { quoted: mek });
 
+    // ==========================
+    // MOVIE SELECT LISTENER
+    // ==========================
     const listener = async (update) => {
-      const m2 = update.messages[0];
-      if (!m2.message) return;
+      const mm = update.messages[0];
+      if (!mm.message) return;
 
-      const text = m2.message.conversation || m2.message.extendedTextMessage?.text;
-      const isReply = m2.message.extendedTextMessage?.contextInfo?.stanzaId === sentMsg.key.id;
+      const text = mm.message.conversation || mm.message.extendedTextMessage?.text;
+      const isReply = mm.message.extendedTextMessage &&
+                      mm.message.extendedTextMessage.contextInfo?.stanzaId;
 
-      if (isReply && ["1", "2", "3"].includes(text)) {
+      if (["1", "2", "3"].includes(text)) {
         const index = parseInt(text) - 1;
         const selected = results[index];
-
-        await sock.sendMessage(from, { react: { text: "⏳", key: m2.key } });
+        await reply("⏳ Fetching movie details...");
 
         try {
-          const infoApi = `https://test-sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/infodl?q=${selected.Link}&apiKey=55ba0f3355fea54b6a032e8c5249c60f`;
+          const infoApi = `https://sadaslk-apis.vercel.app/api/v1/movie/sublk/infodl?q=${encodeURIComponent(selected.url)}&apiKey=a3b8844e3897880d75331c5b2526d701`;
           const { data } = await axios.get(infoApi);
           const movie = data?.data;
 
-          if (!movie) return reply("❎ Info not found.");
+          if (!movie) return reply("❎ Info not found");
 
           let desc = `🎬 *${movie.title}* | සිංහල උපසිරසි සමඟ\n\n`;
-          desc += `📅 Year: ${movie.date}\n🌍 Country: ${movie.country}\n⭐ Rating: ${movie.rating}\n💬 Subtitles: ${movie.subtitles}\n\n`;
-          desc += `📖 ${movie.description}\n\n*💬 Download Options:*\n`;
+          desc += `📅 Year: ${movie.releaseDate}\n🌍 Country: ${movie.country}\n⭐ Rating: ${movie.ratingValue}\n\n`;
+          desc += `📖 ${movie.tagline || ''}\n\n`;
+          desc += `*💬 Download Options:*\n\n`;
 
-          movie.downloadLinks.forEach((dl, i) => {
-            desc += `${i + 1}️⃣ ║❯❯ ${dl.quality} (${dl.size})\n`;
+          movie.pixeldrainDownloads.forEach((dl, i) => {
+            let finalLink = dl.finalDownloadUrl;
+            if (finalLink.includes("pixeldrain.com")) {
+              const fileId = finalLink.split("/u/")[1];
+              finalLink = `https://pixeldrain.com/api/file/${fileId}`;
+            }
+            if (finalLink.includes("drive.google.com")) {
+              const fileId = finalLink.match(/[-\w]{25,}/)?.[0];
+              finalLink = `https://drive.google.com/uc?export=download&id=${fileId}`;
+            }
+            desc += `${i + 1}️⃣ ║❯❯ ${dl.quality} (${dl.size})\n🔗 ${finalLink}\n\n`;
           });
 
-          const infoMsg = await sock.sendMessage(from, {
-            image: { url: movie.images[0] },
-            caption: desc
-          }, { quoted: m2 });
-
-          await sock.sendMessage(from, { react: { text: "🎬", key: m2.key } });
-
-          const dlListener = async (dlUpdate) => {
-            const d = dlUpdate.messages[0];
-            if (!d.message) return;
-
-            const text2 = d.message.conversation || d.message.extendedTextMessage?.text;
-            const isReply2 = d.message.extendedTextMessage?.contextInfo?.stanzaId === infoMsg.key.id;
-
-            if (isReply2) {
-              const dlIndex = parseInt(text2) - 1;
-              const dlObj = movie.downloadLinks[dlIndex];
-
-              if (!dlObj) return reply("❎ Invalid download option.");
-
-              await sock.sendMessage(from, { react: { text: "⬇️", key: d.key } });
-
-              let finalLink = dlObj.link;
-
-              if (finalLink.includes("pixeldrain.com")) {
-                const fileId = finalLink.split("/u/")[1];
-                finalLink = `https://pixeldrain.com/api/file/${fileId}`;
-              }
-
-              if (finalLink.includes("drive.google.com")) {
-                const fileId = finalLink.match(/[-\w]{25,}/)?.[0];
-                finalLink = `https://drive.google.com/uc?export=download&id=${fileId}`;
-              }
-
-              await sock.sendMessage(from, {
-                document: { url: finalLink },
-                mimetype: "video/mp4",
-                fileName: `${movie.title} (${dlObj.quality}).mp4`,
-                caption: `🎬 *${movie.title}*\n💿 Quality: ${dlObj.quality}\n📦 Size: ${dlObj.size}`
-              }, { quoted: d });
-
-              await sock.sendMessage(from, { react: { text: "✅", key: d.key } });
-
-              sock.ev.off("messages.upsert", dlListener);
-            }
-          };
-
-          sock.ev.on("messages.upsert", dlListener);
-          sock.ev.off("messages.upsert", listener);
-
+          await conn.sendMessage(from, { image: { url: movie.imageUrl }, caption: desc }, { quoted: mm });
         } catch (err) {
           reply(`❌ Error: ${err.message}`);
-          sock.ev.off("messages.upsert", listener);
         }
+
+        conn.ev.off("messages.upsert", listener);
       }
     };
 
-    sock.ev.on("messages.upsert", listener);
+    conn.ev.on("messages.upsert", listener);
 
   } catch (err) {
     reply(`❌ ERROR: ${err.message}`);
