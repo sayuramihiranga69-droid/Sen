@@ -1,147 +1,124 @@
-const config = require('../config')
-const { cmd, commands } = require('../command')
-const { getBuffer, getGroupAdmins, getRandom, h2k, isUrl, Json, runtime, sleep, fetchJson} = require('../lib/functions')
-const fs = require('fs');
-const axios = require('axios')
-var imgmsg = "*Give me a anime name !*"
-var descgs = "It gives details of given anime name."
-var cants = "I cant find this anime."
+const axios = require("axios");
+const { cmd } = require("../lib/command");
 
-//====================================================================================
 cmd({
-    pattern: "loli",
-    alias: ["imgloli"],
-    react: '💞',
-    desc: "Download anime loli images.",
-    category: "anime",
-    use: '.loli',
-    filename: __filename
-},
-async(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply}) => {
-try{
+  pattern: "baiscopes",
+  desc: "Search and download movies from Baiscopes",
+  category: "movie",
+  use: ".baiscopes Avengers",
+  react: "🎬",
+  filename: __filename
+}, async (conn, mek, msg, { from, args, reply }) => {
+  try {
+    const q = args.join(" ").trim();
+    if (!q) return reply("❎ *Please enter a movie name!*\nExample: _.baiscopes Captain America_");
 
-let res = await axios.get('https://api.lolicon.app/setu/v2?num=1&r18=0&tag=lolicon')
-let wm = `💞 Random loli image
+    await conn.sendMessage(from, { react: { text: '🔎', key: mek.key } });
 
-© 𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃 v${require("../package.json").version} (Test)\ns© 𝐏𝐎𝐖𝐄𝐑𝐄𝐃 𝐁𝐘 𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃`
-await conn.sendMessage(from, { image: { url: res.data.data[0].urls.original }, caption: wm}, { quoted: mek })
-} catch (e) {
-reply(cants)
-console.log(e)
-}
-})
+    // API Key added by ChatGPT (requested by user)
+    const API_KEY = "55ba0f3355fea54b6a032e8c5249c60f";
 
-//=====================================================================
-cmd({
-    pattern: "waifu",
-    alias: ["imgwaifu"],
-    react: '💫',
-    desc: "Download anime waifu images.",
-    category: "anime",
-    use: '.waifu',
-    filename: __filename
-},
-async(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply}) => {
-try{
-let res = await axios.get('https://api.waifu.pics/sfw/waifu')
-let wm = `🩵 Random Waifu image
+    const searchApi = `https://sadaslk-apis.vercel.app/api/v1/movie/baiscopes/search?q=${encodeURIComponent(q)}&apiKey=${API_KEY}`;
 
-© 𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃 v${require("../package.json").version} (Test)\ns© 𝐏𝐎𝐖𝐄𝐑𝐄𝐃 𝐁𝐘 𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃`
-await conn.sendMessage(from, { image: { url: res.data.url }, caption: wm}, { quoted: mek })
-} catch (e) {
-reply(cants)
-console.log(e)
-}
-})
+    const { data } = await axios.get(searchApi);
+    if (!data?.status || !data.data.length)
+      return reply("❎ *No Baiscopes results found!*");
 
-//================================================================
-cmd({
-    pattern: "neko",
-    alias: ["imgneko"],
-    react: '💫',
-    desc: "Download anime neko images.",
-    category: "anime",
-    use: '.neko',
-    filename: __filename
-},
-async(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply}) => {
-try{
-let res = await axios.get('https://api.waifu.pics/sfw/neko')
-let wm = `🩷 Random neko image
+    const results = data.data.slice(0, 5);
 
-© 𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃 v${require("../package.json").version} (Test)\ns© 𝐏𝐎𝐖𝐄𝐑𝐄𝐃 𝐁𝐘 𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃`
-await conn.sendMessage(from, { image: { url: res.data.url  }, caption: wm}, { quoted: mek })
-} catch (e) {
-reply(cants)
-console.log(e)
-}
-})
-  
-//=====================================================================
-cmd({
-    pattern: "megumin",
-    alias: ["imgmegumin"],
-    react: '💕',
-    desc: "Download anime megumin images.",
-    category: "anime",
-    use: '.megumin',
-    filename: __filename
-},
-async(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply}) => {
-try{
-let res = await axios.get('https://api.waifu.pics/sfw/megumin')
-let wm = `❤️‍🔥Random megumin image
+    const buttons = results.map((r, i) => ({
+      buttonId: `bais_select_${i}`,
+      buttonText: { displayText: `🎬 ${r.title}` },
+      type: 1
+    }));
 
-© 𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃 v${require("../package.json").version} (Test)\ns© 𝐏𝐎𝐖𝐄𝐑𝐄𝐃 𝐁𝐘 𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃`
-await conn.sendMessage(from, { image: { url: res.data.url }, caption: wm}, { quoted: mek })
-} catch (e) {
-reply(cants)
-console.log(e)
-}
-})
+    await conn.sendMessage(from, {
+      image: { url: results[0].imageUrl },
+      caption: `🎬 *Top Baiscopes Results for:* _${q}_
 
-//================================================================
-cmd({
-    pattern: "maid",
-    alias: ["imgmaid"],
-    react: '💫',
-    desc: "Download anime maid images.",
-    category: "anime",
-    use: '.maid',
-    filename: __filename
-},
-async(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply}) => {
-try{
-let res = await axios.get('https://api.waifu.im/search/?included_tags=maid')
-let wm = `💞 Random maid image
+Select a movie from the buttons below 👇`,
+      buttons,
+      headerType: 4
+    }, { quoted: mek });
 
-© 𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃 v${require("../package.json").version} (Test)\ns© 𝐏𝐎𝐖𝐄𝐑𝐄𝐃 𝐁𝐘 𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃`
-await conn.sendMessage(from, { image: { url: res.data.images[0].url  }, caption: wm}, { quoted: mek })
-} catch (e) {
-reply(cants)
-console.log(e)
-}
-})
+    // Listener 1 — Movie selection
+    const movieListener = async (u) => {
+      const m = u.messages[0];
+      if (!m?.message?.buttonsResponseMessage) return;
+      if (m.key.remoteJid !== from) return;
 
-//=====================================================================
-cmd({
-    pattern: "awoo",
-    alias: ["imgawoo"],
-    react: '💞',
-    desc: "Download anime awoo images.",
-    category: "anime",
-    use: '.awoo',
-    filename: __filename
-},
-async(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply}) => {
-try{
-let res = await axios.get('https://api.waifu.pics/sfw/awoo')
-let wm = `💞 Random awoo image
+      const id = m.message.buttonsResponseMessage.selectedButtonId;
+      if (!id.startsWith("bais_select_")) return;
 
-© 𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃 v${require("../package.json").version} (Test)\ns© 𝐏𝐎𝐖𝐄𝐑𝐄𝐃 𝐁𝐘 𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃`
-await conn.sendMessage(from, { image: { url: res.data.url }, caption: wm}, { quoted: mek })
-} catch (e) {
-reply(cants)
-console.log(e)
-}
-})
+      const index = Number(id.split("_")[2]);
+      const selected = results[index];
+      if (!selected) return;
+
+      await conn.sendMessage(from, { react: { text: '⏳', key: m.key } });
+
+      const infoApi = `https://sadaslk-apis.vercel.app/api/v1/movie/baiscopes/infodl?q=${encodeURIComponent(selected.link)}&apiKey=${API_KEY}`;
+
+      const { data: infoData } = await axios.get(infoApi);
+      if (!infoData?.status) return reply("❎ *Failed to get movie info!*");
+
+      const info = infoData.data;
+
+      const dlButtons = info.downloadLinks.map((dl, i) => ({
+        buttonId: `bais_dl_${i}`,
+        buttonText: { displayText: `⭐ ${dl.quality} (${dl.size})` },
+        type: 1
+      }));
+
+      await conn.sendMessage(from, {
+        image: { url: info.movieInfo.galleryImages[0] },
+        caption: `
+🎬 *${info.movieInfo.title}*
+📅 Year: ${info.movieInfo.releaseDate}
+🕒 Runtime: ${info.movieInfo.runtime}
+🌍 Country: ${info.movieInfo.country}
+⭐ IMDb: ${info.movieInfo.ratingValue}
+
+Select a download quality 👇`,
+        buttons: dlButtons,
+        headerType: 4
+      }, { quoted: m });
+
+      conn.ev.off("messages.upsert", movieListener);
+
+      // Listener 2 — Download quality selection
+      const dlListener = async (d) => {
+        const x = d.messages[0];
+        if (!x?.message?.buttonsResponseMessage) return;
+        if (x.key.remoteJid !== from) return;
+
+        const dlId = x.message.buttonsResponseMessage.selectedButtonId;
+        if (!dlId.startsWith("bais_dl_")) return;
+
+        const dlIndex = Number(dlId.split("_")[2]);
+        const dlObj = info.downloadLinks[dlIndex];
+        if (!dlObj) return;
+
+        await conn.sendMessage(from, { react: { text: '⬇️', key: x.key } });
+
+        await conn.sendMessage(from, {
+          document: { url: dlObj.directLinkUrl },
+          mimetype: "video/mp4",
+          fileName: `${info.movieInfo.title} (${dlObj.quality}).mp4`,
+          caption: `🎬 *${info.movieInfo.title}*\n⭐ ${dlObj.quality}\n📦 ${dlObj.size}\n\n📥 Download Successful!`
+        }, { quoted: x });
+
+        await conn.sendMessage(from, { react: { text: '✅', key: x.key } });
+
+        conn.ev.off("messages.upsert", dlListener);
+      };
+
+      conn.ev.on("messages.upsert", dlListener);
+    };
+
+    conn.ev.on("messages.upsert", movieListener);
+
+  } catch (err) {
+    console.error(err);
+    reply(`❌ *ERROR:* ${err.message}`);
+  }
+});
