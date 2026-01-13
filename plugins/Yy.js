@@ -4,59 +4,54 @@ const { fetchJson } = require('../lib/functions');
 const tharuzz_footer = "> Powerd by 𝙳𝙰𝚁𝙺-𝙺𝙽𝙸𝙶𝙷𝚃-𝚇𝙼𝙳";
 
 
+const { cmd } = require("../command");
+
 cmd({
-  pattern: "send",
-  alias: ["sendme", 'save'],
-  react: '📤',
-  desc: "Forwards quoted message back to user",
+  pattern: "save",
+  react: "💾",
+  desc: "Save WhatsApp status",
   category: "utility",
   filename: __filename
 }, async (client, message, match, { from }) => {
   try {
-    if (!match.quoted) {
+
+    // status check
+    if (!message.quoted || message.quoted.key.remoteJid !== "status@broadcast") {
       return await client.sendMessage(from, {
-        text: "*🍁 Please reply to a message!*"
+        text: "🍁 *Please reply to a WhatsApp STATUS!*"
       }, { quoted: message });
     }
 
-    const buffer = await match.quoted.download();
-    const mtype = match.quoted.mtype;
-    const options = { quoted: message };
+    const quoted = message.quoted;
+    const buffer = await quoted.download();
+    const mtype = quoted.mtype;
 
-    let messageContent = {};
-    switch (mtype) {
-      case "imageMessage":
-        messageContent = {
-          image: buffer,
-          caption: match.quoted.text || '',
-          mimetype: match.quoted.mimetype || "image/jpeg"
-        };
-        break;
-      case "videoMessage":
-        messageContent = {
-          video: buffer,
-          caption: match.quoted.text || '',
-          mimetype: match.quoted.mimetype || "video/mp4"
-        };
-        break;
-      case "audioMessage":
-        messageContent = {
-          audio: buffer,
-          mimetype: "audio/mp4",
-          ptt: match.quoted.ptt || false
-        };
-        break;
-      default:
-        return await client.sendMessage(from, {
-          text: "❌ Only image, video, and audio messages are supported"
-        }, { quoted: message });
+    let content = {};
+
+    if (mtype === "imageMessage") {
+      content = {
+        image: buffer,
+        caption: "📥 *Status Saved*"
+      };
+    } 
+    else if (mtype === "videoMessage") {
+      content = {
+        video: buffer,
+        caption: "📥 *Status Saved*"
+      };
+    } 
+    else {
+      return await client.sendMessage(from, {
+        text: "❌ Only image & video status supported"
+      }, { quoted: message });
     }
 
-    await client.sendMessage(from, messageContent, options);
-  } catch (error) {
-    console.error("Forward Error:", error);
+    await client.sendMessage(from, content, { quoted: message });
+
+  } catch (e) {
+    console.error(e);
     await client.sendMessage(from, {
-      text: "❌ Error forwarding message:\n" + error.message
+      text: "❌ Failed to save status"
     }, { quoted: message });
   }
 });
