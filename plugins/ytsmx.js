@@ -1,224 +1,163 @@
-const config = require('../config');
-const { cmd } = require('../command');
-const { getSearch, getDetails, getDownload } = require('sinhalasub.lk');
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
+// ===============================
+// 📌 SINHALA SUB MOVIE SEARCH PLUGIN
+// ===============================
 
-cmd({
-    pattern: "sinhalasub",
-    alias: ["submovie", "sinhala"],
-    react: "🎬",
-    desc: "Search and download movies with Sinhala subtitles as MP4 document with thumbnail preview",
-    category: "download",
-    use: ".sinhalasub <movie name>",
-    filename: __filename
-}, async (conn, m, mek, { from, q, reply }) => {
+const axios = require("axios");
+
+module.exports = {
+  name: "sinhalasub",
+  alias: ["ssub", "sinhala"],
+  desc: "Search SinhalaSub Movies + Info + Download",
+  category: "movie",
+  usage: ".sinhalasub <movie name>",
+  react: "🎬",
+
+  start: async (sock, msg, { args, sender }) => {
     try {
-        if (!q) return await reply("❌ Please provide a movie name to search!");
+      const q = args.join(" ");
+      if (!q)
+        return sock.sendMessage(msg.from, {
+          text: '❎ Please enter a movie name or year!\n\nExample: *.sinhalasub Titanic*'
+        }, { quoted: msg });
 
-        // Search for movies using sinhalasub.lk
-        const searchResponse = await getSearch(q);
-        if (!searchResponse.status || !searchResponse.result || searchResponse.result.length === 0) {
-            return await reply("❌ No movies found for your query!");
-        }
+      await sock.sendMessage(msg.from, { react: { text: "🕵️", key: msg.key } });
 
-        // Show all search results
-        const results = searchResponse.result;
-        let info = `🎬 *𝚂𝙸𝙽𝙷𝙰𝙻𝙰𝚂𝚄𝙱 𝙼𝙾𝚅𝙸𝙴 𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝚁* 🎬\n\n` +
-            `🔍 *Search Query:* ${q}\n\n` +
-            `🔽 *Reply with a number to select a movie:*\n`;
+      // 🔥 API KEY ADDED
+      const searchApi = `https://test-sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/search?q=${encodeURIComponent(q)}&apiKey=55ba0f3355fea54b6a032e8c5249c60f`;
+      const { data } = await axios.get(searchApi);
 
-        results.forEach((movie, index) => {
-            info += `${index + 1}. *${movie.title}* (${movie.year})\n` +
-                    `   ⭐ Rating: ${movie.rating || "N/A"}\n` +
-                    `   🔗 ${movie.link}\n`;
-        });
+      if (!data?.data || data.data.length === 0)
+        return sock.sendMessage(msg.from, { text: "❎ No SinhalaSub movies found!" }, { quoted: msg });
 
-        info += `\n${config.FOOTER || "*© 𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈 𝚀𝚄𝙴𝙴𝙽 𝙶𝙸𝙼𝙸*"}`;
+      const results = data.data.slice(0, 3);
 
-        // Try to send message with thumbnail, fallback to text
-        let sentMsg;
-        try {
-            sentMsg = await conn.sendMessage(from, { 
-                image: { url: results[0].image || 'https://placehold.co/200x300' }, 
-                caption: info 
-            }, { quoted: mek });
-        } catch (imageError) {
-            console.error(`Failed to load thumbnail: ${imageError.message}`);
-            sentMsg = await conn.sendMessage(from, { text: info }, { quoted: mek });
-        }
+      let caption = `🎬 *Top SinhalaSub Results for:* ${q}\n\n`;
+      results.forEach((movie, i) => {
+        caption += `*${i + 1}. ${movie.Title}*\n📅 ${movie.Year} | ${movie.Type}\n💿 ${movie.Quality}\n\n`;
+      });
 
-        const messageID = sentMsg.key.id;
-        await conn.sendMessage(from, { react: { text: '🎥', key: sentMsg.key } });
+      caption += `*💬 Reply with number (1-${results.length}) to view details.*`;
 
-        // Listen for movie selection reply
-        conn.ev.on('messages.upsert', async (messageUpdate) => {
-            try {
-                const mekInfo = messageUpdate?.messages[0];
-                if (!mekInfo?.message) return;
+      const sentMsg = await sock.sendMessage(msg.from, {
+        image: { url: results[0].Img },
+        caption
+      }, { quoted: msg });
 
-                const messageType = mekInfo?.message?.conversation || mekInfo?.message?.extendedTextMessage?.text;
-                const isReplyToSentMsg = mekInfo?.message?.extendedTextMessage?.contextInfo?.stanzaId === messageID;
+      // ==========================
+      //  MOVIE SELECT LISTENER
+      // ==========================
+      const listener = async (update) => {
+        const m = update.messages[0];
+        if (!m.message) return;
 
-                if (!isReplyToSentMsg) return;
+        const text = m.message.conversation || m.message.extendedTextMessage?.text;
+        const isReply =
+          m.message.extendedTextMessage &&
+          m.message.extendedTextMessage.contextInfo?.stanzaId === sentMsg.key.id;
 
-                let selectedIndex = parseInt(messageType) - 1;
-                if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= results.length) {
-                    return await reply("❌ Invalid choice! Reply with a number between 1 and " + results.length + ".");
-                }
+        if (isReply && ["1", "2", "3"].includes(text)) {
+          const index = parseInt(text) - 1;
+          const selected = results[index];
 
-                const selectedMovie = results[selectedIndex];
-                const movieDetails = await getDetails(selectedMovie.link);
-                if (!movieDetails.status || !movieDetails.result) {
-                    return await reply("❌ Failed to fetch movie details!");
-                }
+          await sock.sendMessage(msg.from, { react: { text: "⏳", key: m.key } });
 
-                const { title, image: thumbnail, year, rating, category, director, dl_links } = movieDetails.result;
-                const qualityOptions = dl_links.filter(link => link.quality !== 'Subtitles');
-                if (qualityOptions.length === 0) {
-                    return await reply("❌ No download links available for this movie!");
-                }
+          try {
+            // 🔥 API KEY ADDED
+            const infoApi = `https://test-sadaslk-apis.vercel.app/api/v1/movie/sinhalasub/infodl?q=${selected.Link}&apiKey=55ba0f3355fea54b6a032e8c5249c60f`;
+            const { data } = await axios.get(infoApi);
 
-                let qualityMenu = `🎬 *Selected Movie:* ${title}\n` +
-                    `📅 *Year:* ${year}\n` +
-                    `⭐ *Rating:* ${rating}\n` +
-                    `🎭 *Category:* ${category.join(', ')}\n` +
-                    `🎥 *Director:* ${director || 'N/A'}\n\n` +
-                    `🔽 *Reply with a number to select quality (downloads as MP4 document):*\n`;
+            const movie = data?.data;
+            if (!movie)
+              return sock.sendMessage(msg.from, { text: "❎ Info not found." }, { quoted: m });
 
-                const qualityMap = {};
-                qualityOptions.forEach((link, index) => {
-                    qualityMenu += `${index + 1}. *${link.quality} (${link.size})*\n`;
-                    qualityMap[`${index + 1}`] = { quality: link.quality, link: link.link, size: link.size };
-                });
+            let desc = `🎬 *${movie.title}*\n\n`;
+            desc += `🗓 Year: ${movie.date}\n🌍 Country: ${movie.country}\n⏱ Duration: ${movie.duration}\n⭐ Rating: ${movie.rating}\n👤 Author: ${movie.author}\n💬 Subtitles: ${movie.subtitles}\n\n`;
+            desc += `📖 ${movie.description}\n\n`;
+            desc += `*💬 Select a download option:*\n`;
 
-                qualityMenu += `\n${config.FOOTER || "*© ᴘᴏᴡᴇᴀʀᴅ ʙʏ ᴍᴀɴᴊᴜ-ᴍᴅ*"}`;
+            movie.downloadLinks.slice(0, 3).forEach((dl, i) => {
+              desc += `${i + 1}️⃣ ║❯❯ ${dl.quality} (${dl.size})\n`;
+            });
 
-                // Try to send quality menu with thumbnail, fallback to text
-                let qualityMsg;
+            const infoMsg = await sock.sendMessage(msg.from, {
+              image: { url: movie.images[0] },
+              caption: desc
+            }, { quoted: m });
+
+            await sock.sendMessage(msg.from, { react: { text: "🎬", key: m.key } });
+
+            // ==========================
+            // DOWNLOAD LISTENER
+            // ==========================
+            const dlListener = async (dlUpdate) => {
+              const d = dlUpdate.messages[0];
+              if (!d.message) return;
+
+              const text2 = d.message.conversation || d.message.extendedTextMessage?.text;
+              const isReply2 =
+                d.message.extendedTextMessage &&
+                d.message.extendedTextMessage.contextInfo?.stanzaId === infoMsg.key.id;
+
+              if (isReply2 && ["1", "2", "3"].includes(text2)) {
+                const dlIndex = parseInt(text2) - 1;
+                const dlObj = movie.downloadLinks[dlIndex];
+
+                if (!dlObj)
+                  return sock.sendMessage(msg.from, { text: "❎ Invalid download option." }, { quoted: d });
+
+                await sock.sendMessage(msg.from, { react: { text: "⬇️", key: d.key } });
+
                 try {
-                    qualityMsg = await conn.sendMessage(from, { 
-                        image: { url: thumbnail }, 
-                        caption: qualityMenu 
-                    }, { quoted: mek });
-                } catch (imageError) {
-                    console.error(`Failed to load quality menu thumbnail: ${imageError.message}`);
-                    qualityMsg = await conn.sendMessage(from, { text: qualityMenu }, { quoted: mek });
+                  let finalLink = dlObj.link;
+
+                  // PixelDrain Fix
+                  if (finalLink.includes("pixeldrain.com")) {
+                    const fileId = finalLink.split("/u/")[1];
+                    finalLink = `https://pixeldrain.com/api/file/${fileId}`;
+                  }
+
+                  // Google Drive Fix
+                  if (finalLink.includes("drive.google.com")) {
+                    const fileId = finalLink.match(/[-\w]{25,}/)?.[0];
+                    finalLink = `https://drive.google.com/uc?export=download&id=${fileId}`;
+                  }
+
+                  await sock.sendMessage(msg.from, {
+                    document: { url: finalLink },
+                    mimetype: "video/mp4",
+                    fileName: `${movie.title} (${dlObj.quality}).mp4`,
+                    caption: `🎬 *${movie.title}*\n💿 Quality: ${dlObj.quality}\n📦 Size: ${dlObj.size}`
+                  }, { quoted: d });
+
+                  await sock.sendMessage(msg.from, { react: { text: "✅", key: d.key } });
+
+                } catch (err) {
+                  await sock.sendMessage(msg.from, { react: { text: "❌", key: d.key } });
+                  await sock.sendMessage(msg.from, {
+                    text: `❌ Download failed!\n\nDirect link:\n${finalLink}`
+                  }, { quoted: d });
                 }
 
-                const qualityMessageID = qualityMsg.key.id;
+                sock.ev.off("messages.upsert", dlListener);
+              }
+            };
 
-                // Listen for quality selection reply
-                conn.ev.on('messages.upsert', async (subMessageUpdate) => {
-                    try {
-                        const subMekInfo = subMessageUpdate?.messages[0];
-                        if (!subMekInfo?.message) return;
+            sock.ev.on("messages.upsert", dlListener);
+            sock.ev.off("messages.upsert", listener);
 
-                        const subMessageType = subMekInfo?.message?.conversation || subMekInfo?.message?.extendedTextMessage?.text;
-                        const isReplyToQualityMsg = subMekInfo?.message?.extendedTextMessage?.contextInfo?.stanzaId === qualityMessageID;
+          } catch (err) {
+            await sock.sendMessage(msg.from, { react: { text: "❌", key: m.key } });
+            await sock.sendMessage(msg.from, { text: `❌ Error: ${err.message}` }, { quoted: m });
+            sock.ev.off("messages.upsert", listener);
+          }
+        }
+      };
 
-                        if (!isReplyToQualityMsg) return;
+      sock.ev.on("messages.upsert", listener);
 
-                        let userReply = subMessageType.trim();
-                        if (!qualityMap[userReply]) {
-                            return await reply("❌ Invalid choice! Reply with a number (e.g., 1, 2, 3).");
-                        }
-
-                        const { quality, link: downloadPageLink, size } = qualityMap[userReply];
-                        const msg = await conn.sendMessage(from, { text: `⏳ Downloading *${title}* (${quality})...` }, { quoted: mek });
-
-                        // Get direct download link
-                        let directDownloadUrl;
-                        try {
-                            const downloadResponse = await getDownload(downloadPageLink);
-                            console.log('Download Response:', downloadResponse); // Log response for debugging
-                            if (!downloadResponse.status || !downloadResponse.result) {
-                                throw new Error('Invalid download response');
-                            }
-                            directDownloadUrl = downloadResponse.result;
-                        } catch (downloadError) {
-                            console.error(`Failed to fetch download link: ${downloadError.message}`);
-                            let fallbackMessage = `❌ Failed to fetch direct download link for *${title}* (${quality}).\n` +
-                                                `Try these alternative links:\n`;
-                            qualityOptions.forEach((link, index) => {
-                                fallbackMessage += `${index + 1}. ${link.quality} (${link.size}): ${link.link}\n`;
-                            });
-                            return await reply(fallbackMessage);
-                        }
-
-                        // Stream download movie to disk
-                        const tempMoviePath = path.join('/tmp', `${title.replace(/[^a-zA-Z0-9]/g, '_')}_${quality}.mp4`);
-                        const tempThumbnailPath = path.join('/tmp', `${title.replace(/[^a-zA-Z0-9]/g, '_')}_thumbnail.jpg`);
-
-                        // Download movie
-                        const movieWriter = fs.createWriteStream(tempMoviePath);
-                        const movieResponse = await axios({
-                            url: directDownloadUrl,
-                            method: 'GET',
-                            responseType: 'stream'
-                        });
-                        movieResponse.data.pipe(movieWriter);
-                        await new Promise((resolve, reject) => {
-                            movieWriter.on('finish', resolve);
-                            movieWriter.on('error', reject);
-                        });
-
-                        // Download thumbnail and convert to Base64
-                        let thumbnailBase64;
-                        try {
-                            const thumbnailResponse = await axios({
-                                url: thumbnail,
-                                method: 'GET',
-                                responseType: 'stream'
-                            });
-                            const thumbnailWriter = fs.createWriteStream(tempThumbnailPath);
-                            thumbnailResponse.data.pipe(thumbnailWriter);
-                            await new Promise((resolve, reject) => {
-                                thumbnailWriter.on('finish', resolve);
-                                thumbnailWriter.on('error', reject);
-                            });
-
-                            // Convert thumbnail to Base64
-                            thumbnailBase64 = fs.readFileSync(tempThumbnailPath).toString('base64');
-                        } catch (error) {
-                            console.error(`Failed to download or process thumbnail: ${error.message}`);
-                            thumbnailBase64 = undefined;
-                        }
-
-                        // Send as document with thumbnail preview
-                        await conn.sendMessage(from, {
-                            document: { url: `file://${tempMoviePath}` },
-                            fileName: `${title} (${quality}, ${year}).mp4`,
-                            mimetype: 'video/mp4',
-                            caption: `*${title}* (${quality}, ${size}, ${year})\n*© ᴘᴏᴡᴇᴀʀᴅ ʙʏ ᴍᴀɴᴊᴜ-ᴍᴅ*`,
-                            jpegThumbnail: thumbnailBase64 ? Buffer.from(thumbnailBase64, 'base64') : undefined
-                        }, { quoted: mek });
-
-                        await conn.sendMessage(from, { text: '✅ Media Upload Successful ✅', edit: msg.key });
-
-                        // Clean up temporary files
-                        [tempMoviePath, tempThumbnailPath].forEach(file => {
-                            fs.unlink(file, (err) => {
-                                if (err) console.error(`Failed to delete temp file ${file}: ${err}`);
-                            });
-                        });
-
-                    } catch (error) {
-                        console.error(error);
-                        await reply(`❌ *An error occurred while processing:* ${error.message || "Error!"}`);
-                    }
-                });
-
-            } catch (error) {
-                console.error(error);
-                await reply(`❌ *An error occurred while processing:* ${error.message || "Error!"}`);
-            }
-        });
-
-    } catch (error) {
-        console.error(error);
-        await conn.sendMessage(from, { react: { text: '❌', key: mek.key } });
-        await reply(`❌ *An error occurred:* ${error.message || "Error!"}`);
+    } catch (err) {
+      await sock.sendMessage(msg.from, { react: { text: "❌", key: msg.key } });
+      await sock.sendMessage(msg.from, { text: `❌ ERROR: ${err.message}` }, { quoted: msg });
     }
-});
+  }
+};
