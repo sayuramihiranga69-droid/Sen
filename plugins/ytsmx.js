@@ -1,88 +1,136 @@
 const { cmd } = require('../command');
 const axios = require('axios');
 
+const API_KEY = "deb4e2d4982c6bc2";
+const API_BASE = "https://api-dark-shan-yt.koyeb.app/movie";
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 🔍 SEARCH
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 cmd({
-  pattern: "sinhalasubk",
-  alias: ["ssub", "sinhala"],
-  desc: "Search SinhalaSub Movies + Info + Download",
-  category: "movie",
+  pattern: "cinesearch",
+  alias: ["csearch"],
+  desc: "Search CineSubz movies",
+  category: "downloader",
+  react: "🔍",
+  filename: __filename
+}, async (conn, mek, m, { from, q, reply }) => {
+  try {
+    if (!q) return reply("❗ Usage: .cinesearch <movie name>");
+
+    const url = `${API_BASE}/cinesubz-search?q=${encodeURIComponent(q)}&apikey=${API_KEY}`;
+    const { data } = await axios.get(url);
+
+    if (!data.status || !data.result || data.result.length === 0) {
+      return reply("❌ No results found");
+    }
+
+    let msg = `🎬 *CineSubz Search Results*\n\n`;
+    data.result.slice(0, 10).forEach((v, i) => {
+      msg += `*${i + 1}. ${v.title}*\n`;
+      msg += `🔗 ${v.url}\n\n`;
+    });
+
+    msg += `📌 Use:\n.cinedetails <url>`;
+
+    await conn.sendMessage(from, { text: msg }, { quoted: mek });
+
+  } catch (e) {
+    console.log(e);
+    reply("❌ Search error");
+  }
+});
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 🎬 DETAILS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+cmd({
+  pattern: "cinedetails",
+  alias: ["cdetails"],
+  desc: "Get movie details",
+  category: "downloader",
   react: "🎬",
   filename: __filename
-},
-async (conn, mek, m, { from, q, reply }) => {
+}, async (conn, mek, m, { from, q, reply }) => {
   try {
-    if (!q) return reply(`❎ Please enter a movie name\n\nExample: .sinhalasubk Titanic`);
+    if (!q) return reply("❗ Usage: .cinedetails <cinesubz url>");
 
-    await reply("🕵️ Searching SinhalaSub...");
+    const url = `${API_BASE}/cinesubz-info?url=${encodeURIComponent(q)}&apikey=${API_KEY}`;
+    const { data } = await axios.get(url);
 
-    const searchApi = `https://sadaslk-apis.vercel.app/api/v1/movie/sublk/search?q=${encodeURIComponent(q)}&apiKey=a3b8844e3897880d75331c5b2526d701`;
-    const { data } = await axios.get(searchApi);
+    if (!data.status || !data.result) {
+      return reply("❌ Details not found");
+    }
 
-    if (!data?.data || data.data.length === 0) return reply("❎ No SinhalaSub movies found!");
+    const r = data.result;
 
-    const results = data.data.slice(0, 3);
+    let msg = `🎬 *${r.title}*\n\n`;
+    if (r.year) msg += `📅 Year: ${r.year}\n`;
+    if (r.genre) msg += `🎭 Genre: ${r.genre}\n`;
+    if (r.rating) msg += `⭐ Rating: ${r.rating}\n`;
 
-    let message = `🎬 *Top results for:* ${q}\n\n`;
-    results.forEach((movie, i) => {
-      message += `*${i + 1}. ${movie.title}* (${movie.releaseDate})\n`;
-    });
-    message += `\n*💬 Reply with number (1-${results.length}) to see details & download links.*`;
+    msg += `\n━━━━━━━━━━━━━━\n\n`;
 
-    await conn.sendMessage(from, { image: { url: results[0].imageUrl }, caption: message }, { quoted: mek });
+    if (r.downloads && r.downloads.length > 0) {
+      msg += `📥 *Download Links*\n\n`;
+      r.downloads.forEach(v => {
+        msg += `*${v.quality}*\n`;
+        msg += `🔗 ${v.url}\n\n`;
+      });
+      msg += `📌 Use:\n.cinedownload <countdown_url>`;
+    } else {
+      msg += "❌ No downloads available";
+    }
 
-    // ==========================
-    // MOVIE SELECT LISTENER
-    // ==========================
-    const listener = async (update) => {
-      const mm = update.messages[0];
-      if (!mm.message) return;
+    if (r.image) {
+      await conn.sendMessage(from, {
+        image: { url: r.image },
+        caption: msg
+      }, { quoted: mek });
+    } else {
+      await conn.sendMessage(from, { text: msg }, { quoted: mek });
+    }
 
-      const text = mm.message.conversation || mm.message.extendedTextMessage?.text;
-      const isReply = mm.message.extendedTextMessage &&
-                      mm.message.extendedTextMessage.contextInfo?.stanzaId;
+  } catch (e) {
+    console.log(e);
+    reply("❌ Details error");
+  }
+});
 
-      if (["1", "2", "3"].includes(text)) {
-        const index = parseInt(text) - 1;
-        const selected = results[index];
-        await reply("⏳ Fetching movie details...");
 
-        try {
-          const infoApi = `https://sadaslk-apis.vercel.app/api/v1/movie/sublk/infodl?q=${encodeURIComponent(selected.url)}&apiKey=a3b8844e3897880d75331c5b2526d701`;
-          const { data } = await axios.get(infoApi);
-          const movie = data?.data;
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 📥 DOWNLOAD
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+cmd({
+  pattern: "cinedownload",
+  alias: ["cdl"],
+  desc: "Download movie",
+  category: "downloader",
+  react: "📥",
+  filename: __filename
+}, async (conn, mek, m, { from, q, reply }) => {
+  try {
+    if (!q) return reply("❗ Usage: .cinedownload <countdown url>");
 
-          if (!movie) return reply("❎ Info not found");
+    const url = `${API_BASE}/cinesubz-download?url=${encodeURIComponent(q)}&apikey=${API_KEY}`;
+    const { data } = await axios.get(url);
 
-          let desc = `🎬 *${movie.title}* | සිංහල උපසිරසි සමඟ\n\n`;
-          desc += `📅 Year: ${movie.releaseDate}\n🌍 Country: ${movie.country}\n⭐ Rating: ${movie.ratingValue}\n\n`;
-          desc += `📖 ${movie.tagline || ''}\n\n`;
-          desc += `*💬 Download Options:*\n\n`;
+    if (!data.status || !data.result?.download_url) {
+      return reply("❌ Download link error");
+    }
 
-          movie.pixeldrainDownloads.forEach((dl, i) => {
-            let finalLink = dl.finalDownloadUrl;
-            if (finalLink.includes("pixeldrain.com")) {
-              const fileId = finalLink.split("/u/")[1];
-              finalLink = `https://pixeldrain.com/api/file/${fileId}`;
-            }
-            if (finalLink.includes("drive.google.com")) {
-              const fileId = finalLink.match(/[-\w]{25,}/)?.[0];
-              finalLink = `https://drive.google.com/uc?export=download&id=${fileId}`;
-            }
-            desc += `${i + 1}️⃣ ║❯❯ ${dl.quality} (${dl.size})\n🔗 ${finalLink}\n\n`;
-          });
+    const dl = data.result.download_url;
 
-          await conn.sendMessage(from, { image: { url: movie.imageUrl }, caption: desc }, { quoted: mm });
-        } catch (err) {
-          reply(`❌ Error: ${err.message}`);
-        }
+    await conn.sendMessage(from, {
+      document: { url: dl },
+      mimetype: "video/mp4",
+      fileName: `CineSubz_${Date.now()}.mp4`,
+      caption: "✅ Downloaded via CineSubz"
+    }, { quoted: mek });
 
-        conn.ev.off("messages.upsert", listener);
-      }
-    };
-
-    conn.ev.on("messages.upsert", listener);
-
-  } catch (err) {
-    reply(`❌ ERROR: ${err.message}`);
+  } catch (e) {
+    console.log(e);
+    reply("❌ Download failed");
   }
 });
