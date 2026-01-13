@@ -4,44 +4,30 @@ const { cmd } = require("../command");
 cmd({
   pattern: "pixeldrain",
   alias: ["pix"],
-  desc: "Download PixelDrain files",
+  desc: "Pixeldrain file එක WhatsApp එකට සෘජුව එවන්න",
   react: "🌐",
   category: "download",
   filename: __filename
 }, async (conn, m, store, { from, q, reply }) => {
   try {
-    if (!q) return reply("❌ Please provide a PixelDrain link.");
+    if (!q) return reply("❌ කරුණාකර Pixeldrain ලින්ක් එකක් ලබා දෙන්න.");
 
     await conn.sendMessage(from, { react: { text: "⬇️", key: m.key } });
 
-    // ✅ Properly encode the full URL
-    const encodedUrl = encodeURIComponent(q.trim());
-    const apiUrl = `https://api-dark-shan-yt.koyeb.app/download/pixeldrain?url=${encodedUrl}&apikey=deb4e2d4982c6bc2`;
+    let fileUrl = q.trim();
 
-    const { data } = await axios.get(apiUrl);
-
-    if (!data.status || !data.data || !data.data.success) {
-      return reply("⚠️ Invalid PixelDrain link or API error.");
-    }
-
-    const file = data.data;
-
-    await conn.sendMessage(from, { react: { text: "⬆️", key: m.key } });
-
+    // Pixeldrain file එක WhatsApp එකට document එකක් වගේ එවන්න
     await conn.sendMessage(from, {
-      document: { url: file.download },
-      fileName: file.filename || "pixeldrain_file.mp4",
+      document: { url: fileUrl },
       mimetype: "application/octet-stream",
-      caption:
-        `📁 *File:* ${file.filename}\n` +
-        `📦 *Size:* ${file.size}\n\n` +
-        `*© Powered By sayura-𝚇𝙼𝙳*`
+      fileName: `pixeldrain_${Date.now()}.mp4`,
+      caption: "📥 Pixeldrain එකෙන් සෘජුව ලබා ගන්නා ලදි"
     }, { quoted: m });
 
     await conn.sendMessage(from, { react: { text: "✅", key: m.key } });
 
   } catch (e) {
-    console.error("PixelDrain Error:", e);
-    reply("❌ Failed to download PixelDrain file.");
+    console.error("Pixeldrain සෘජු එවීමේ දෝෂය:", e);
+    reply("❌ Pixeldrain file එක සෘජුව එවීමට නොහැක.");
   }
 });
