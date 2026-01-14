@@ -1,8 +1,6 @@
 const { cmd } = require('../command');
 const axios = require('axios');
 const sharp = require('sharp');
-const fs = require('fs');
-const path = require('path');
 
 const footer = "✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌☢️☘";
 
@@ -11,10 +9,10 @@ async function react(conn, jid, key, emoji) {
     try { await conn.sendMessage(jid, { react: { text: emoji, key } }); } catch {}
 }
 
-// ───────── Create thumbnail ─────────
+// ───────── Thumbnail ─────────
 async function makeThumbnail(url) {
     try {
-        const img = await axios.get(url, { responseType: "arraybuffer", timeout: 15000 });
+        const img = await axios.get(url, { responseType: "arraybuffer" });
         return await sharp(img.data).resize(300).jpeg({ quality: 65 }).toBuffer();
     } catch (e) {
         console.log("Thumbnail error:", e.message);
@@ -43,24 +41,12 @@ function waitForReply(conn, from, replyToId, timeout = 120000) {
     });
 }
 
-// ───────── Download file from Pixeldrain ─────────
-async function downloadPixeldrain(url, filePath) {
-    console.log("⬇️ Downloading from Pixeldrain:", url);
-    const response = await axios({ url, method: "GET", responseType: "stream" });
-    return new Promise((resolve, reject) => {
-        const writer = fs.createWriteStream(filePath);
-        response.data.pipe(writer);
-        writer.on('finish', resolve);
-        writer.on('error', reject);
-    });
-}
-
-// ───────── Send document ─────────
-async function sendDoc(conn, from, info, filePath, quality, quoted) {
+// ───────── Send WhatsApp doc ─────────
+async function sendDoc(conn, from, info, url, quality, quoted) {
     const thumb = info.image ? await makeThumbnail(info.image) : null;
     const caption = `🎬 *${info.title}*\n*${quality}*\n${footer}`;
     const docMsg = await conn.sendMessage(from, {
-        document: { url: filePath },
+        document: { url },
         fileName: `${info.title} (${quality}).mp4`.replace(/[\/\\:*?"<>|]/g,""),
         mimetype: "video/mp4",
         jpegThumbnail: thumb || undefined,
@@ -72,80 +58,79 @@ async function sendDoc(conn, from, info, filePath, quality, quoted) {
 // ───────── Command ─────────
 cmd({
     pattern: "sinhalasubt",
-    desc: "Search & download Sinhala subtitles movie",
+    desc: "Search & download Sinhala subtitles movie with full 4-step endpoints",
     category: "downloader",
     react: "🔍",
     filename: __filename
 }, async (conn, mek, m, { from, q, reply }) => {
     try {
         if (!q) return reply("❗ Example: .sinhalasubt New");
+
         await react(conn, from, m.key, "🔍");
 
-        // 1️⃣ Search
-        console.log("🔎 Searching for:", q);
+        // 1️⃣ Search → /sinhalasub-search
+        console.log("🔎 Searching:", q);
         const searchRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-search?q=${encodeURIComponent(q)}&apikey=09acaa863782cc46`);
         const results = searchRes.data?.data;
-        console.log("📄 Search Results:", results?.map(r => r.title));
         if (!results?.length) return reply("❌ No results found");
+        console.log("📄 Search results:", results.map(r => r.title));
 
-        let listText = `🎬 *Search Results*\n\n`;
+        let listText = "🎬 *Search Results*\n\n";
         results.slice(0, 10).forEach((v, i) => { listText += `*${i+1}.* ${v.title}\n`; });
-
         const listMsg = await conn.sendMessage(from, { text: listText + `\nReply number\n\n${footer}` }, { quoted: mek });
 
-        // 2️⃣ Select movie
+        // User selects movie
         const { msg: movieMsg, text: movieText } = await waitForReply(conn, from, listMsg.key.id);
         const index = parseInt(movieText) - 1;
         if (isNaN(index) || !results[index]) return reply("❌ Invalid number");
         await react(conn, from, movieMsg.key, "🎬");
-
         const movie = results[index];
-        console.log("🎬 Selected Movie:", movie.title);
+        console.log("🎬 Selected movie:", movie.title, movie.url);
 
-        // 3️⃣ Get Pixeldrain links from info endpoint
+        // 2️⃣ Info → /sinhalasub-info
+        console.log("📥 Fetching movie info and Pixeldrain page link...");
         const infoRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-info?url=${encodeURIComponent(movie.url)}&apikey=09acaa863782cc46`);
         const info = infoRes.data?.data;
         if (!info) return reply("❌ Failed to get movie info");
 
         const pix = info.downloads?.pixeldrain;
         if (!pix || !pix.length) return reply("❌ No Pixeldrain links found");
-        console.log("📥 Available Pixeldrain links:", pix.map(d => ({ quality: d.quality, url: d.url })));
+        console.log("📌 Available Pixeldrain links:", pix.map(d => ({ quality: d.quality, url: d.url })));
 
-        // Show qualities to user
         let qualityList = "";
-        pix.forEach((d, i) => { qualityList += `*${i+1}.* ${d.quality} (${d.size})\n`; });
-
+        pix.forEach((d,i)=>{ qualityList += `*${i+1}.* ${d.quality} (${d.size})\n`; });
         const qualityMsg = await conn.sendMessage(from, {
             image: { url: info.image },
             caption: `🎬 *${info.title}*\n\nAvailable Downloads:\n${qualityList}\nReply download number\n${footer}`
         }, { quoted: movieMsg });
 
-        // 4️⃣ Select quality
+        // User selects quality
         const { msg: dlMsg, text: dlText } = await waitForReply(conn, from, qualityMsg.key.id);
         const dIndex = parseInt(dlText) - 1;
         if (isNaN(dIndex) || !pix[dIndex]) return reply("❌ Invalid download number");
         await react(conn, from, dlMsg.key, "⬇️");
 
         const chosen = pix[dIndex];
-        console.log("⬇️ Chosen quality:", chosen.quality, "Base Link:", chosen.url);
+        console.log("⬇️ Selected Pixeldrain page link:", chosen.url);
 
-        // 5️⃣ Get real download link via download endpoint
-        const dlRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-download?url=${encodeURIComponent(chosen.url)}&apikey=09acaa863782cc46`);
+        // 3️⃣ Pixeldrain page → /sinhalasub-download
+        console.log("🌐 Fetching Pixeldrain direct download page link...");
+        const pageRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-download?url=${encodeURIComponent(chosen.url)}&apikey=09acaa863782cc46`);
+        const pageLink = pageRes.data?.data?.download;
+        if (!pageLink) return reply("❌ Failed to get Pixeldrain page link");
+        console.log("🔗 Pixeldrain page link:", pageLink);
+
+        // 4️⃣ Real download → /download/pixeldrain
+        console.log("🌐 Fetching real direct download URL...");
+        const dlRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/download/pixeldrain?url=${encodeURIComponent(pageLink)}&apikey=09acaa863782cc46`);
         const realUrl = dlRes.data?.data?.download;
+        if (!realUrl) return reply("❌ Failed to get real download URL");
         console.log("✅ Real download URL:", realUrl);
-        if (!realUrl) return reply("❌ Failed to get real download link");
 
-        // 6️⃣ Download file to temp folder
-        const fileName = `${info.title} (${chosen.quality}).mp4`.replace(/[\/\\:*?"<>|]/g,"");
-        const filePath = path.join(__dirname, fileName);
-        await downloadPixeldrain(realUrl, filePath);
-        console.log("💾 Download completed:", filePath);
-
-        // 7️⃣ Send document via WhatsApp
-        await sendDoc(conn, from, info, filePath, chosen.quality, dlMsg);
-
-        // 8️⃣ Optional: Delete temp file after sending
-        fs.unlink(filePath, () => console.log("🗑 Temp file deleted:", filePath));
+        // 5️⃣ Send to WhatsApp → document
+        console.log("📤 Sending document to WhatsApp...");
+        await sendDoc(conn, from, info, realUrl, chosen.quality, dlMsg);
+        console.log("✅ Done!");
 
     } catch (e) {
         console.error("SINHALASUB ERROR:", e);
