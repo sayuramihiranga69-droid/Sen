@@ -69,7 +69,7 @@ cmd({
 
         // 1️⃣ Search
         const searchRes = await axios.get(
-            `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-search?q=${encodeURIComponent(q)}&apikey=deb4e2d4982c6bc2`
+            `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-search?q=${encodeURIComponent(q)}&apikey=65d6c884d8624c72`
         );
         const results = searchRes.data?.data;
         if (!results?.length) return reply("❌ No results found");
@@ -91,7 +91,7 @@ cmd({
 
         // 3️⃣ Movie info
         const infoRes = await axios.get(
-            `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-info?url=${encodeURIComponent(movie.link)}&apikey=deb4e2d4982c6bc2`
+            `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-info?url=${encodeURIComponent(movie.link)}&apikey=65d6c884d8624c72`
         );
         const info = infoRes.data?.data;
         if (!info) return reply("❌ Failed to get movie info");
@@ -121,7 +121,7 @@ cmd({
 
         // 5️⃣ Get Pixeldrain
         const dlRes = await axios.get(
-            `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-download?url=${encodeURIComponent(chosen.link)}&apikey=deb4e2d4982c6bc2`
+            `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-download?url=${encodeURIComponent(chosen.link)}&apikey=65d6c884d8624c72`
         );
         const pix = dlRes.data?.data?.download?.find(v => v.name.toUpperCase().includes("PIX"));
         if (!pix) return reply("❌ Pixeldrain link not found");
