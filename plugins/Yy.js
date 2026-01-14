@@ -4,14 +4,14 @@ const sharp = require('sharp');
 
 const cinesubz_footer = "✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌𝐄☢️☘";
 
-// ───────── React helper ─────────
+// React helper
 async function react(conn, jid, key, emoji) {
     try {
         await conn.sendMessage(jid, { react: { text: emoji, key } });
     } catch {}
 }
 
-// ───────── Create clear thumbnail ─────────
+// Create thumbnail from poster
 async function makeThumbnail(url) {
     try {
         const img = await axios.get(url, { responseType: "arraybuffer", timeout: 15000 });
@@ -25,7 +25,7 @@ async function makeThumbnail(url) {
     }
 }
 
-// ───────── Wait for reply helper ─────────
+// Wait for reply
 function waitForReply(conn, from, replyToId, timeout = 60000) {
     return new Promise((resolve, reject) => {
         const handler = (update) => {
@@ -33,7 +33,7 @@ function waitForReply(conn, from, replyToId, timeout = 60000) {
             if (!msg?.message) return;
 
             const ctx = msg.message?.extendedTextMessage?.contextInfo;
-            const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
+            const text = msg.message.conversation || msg.message?.extendedTextMessage?.text;
 
             if (msg.key.remoteJid === from && ctx?.stanzaId === replyToId) {
                 conn.ev.off("messages.upsert", handler);
@@ -50,7 +50,7 @@ function waitForReply(conn, from, replyToId, timeout = 60000) {
     });
 }
 
-// ───────── Send document with poster thumbnail ─────────
+// Send document with poster thumbnail
 async function sendMovie(conn, from, info, file, quoted) {
     let thumbnail = null;
     if (info.image) {
@@ -68,7 +68,7 @@ async function sendMovie(conn, from, info, file, quoted) {
     await react(conn, from, docMsg.key, "✅");
 }
 
-// ───────── Command ─────────
+// Command
 cmd({
     pattern: "cinesubsk",
     desc: "CineSubz download with document thumbnail",
@@ -115,9 +115,18 @@ cmd({
         if (!info) return reply("❌ Failed to get movie info");
 
         let infoText = `🎬 *${info.title}*\n\n`;
-        info.downloads.forEach((d, i) => {
-            infoText += `*${i + 1}.* ${d.quality} (${d.size})\n`;
-        });
+        if (info.year) infoText += `📅 Year: ${info.year}\n`;
+        if (info.quality) infoText += `📺 Quality: ${info.quality}\n`;
+        if (info.rating) infoText += `⭐ Rating: ${info.rating}\n`;
+        if (info.duration) infoText += `⏱ Duration: ${info.duration}\n`;
+        if (info.country) infoText += `🌍 Country: ${info.country}\n`;
+        if (info.directors) infoText += `🎬 Directors: ${info.directors}\n\n`;
+
+        if (info.downloads && info.downloads.length > 0) {
+            info.downloads.forEach((d, i) => {
+                infoText += `*${i + 1}.* ${d.quality} (${d.size})\n`;
+            });
+        }
 
         const infoMsg = await conn.sendMessage(from, {
             image: { url: info.image },
