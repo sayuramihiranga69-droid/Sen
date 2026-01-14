@@ -1,126 +1,85 @@
-const { cmd } = require("../command");
-const yts = require("yt-search");
-const axios = require("axios");
+const { cmd } = require('../command');
+const axios = require('axios');
 
-// track ongoing audio upload (to avoid multiple)
-let isUploading = false;
+const footer = "✫☘ 𝐒𝐫𝐢𝐇𝐮𝐛 𝐌𝐨𝐯𝐢𝐞𝐬 ☢️☘";
 
-// 🎵 .yta command
+// ───────── Wait for reply ─────────
+function waitForReply(conn, from, replyToId, timeout = 120000) {
+  return new Promise((resolve, reject) => {
+    const handler = (update) => {
+      const msg = update.messages?.[0];
+      if (!msg?.message) return;
+      const text = msg.message.conversation || msg.message?.extendedTextMessage?.text;
+      if (msg.key.remoteJid === from) {
+        conn.ev.off("messages.upsert", handler);
+        resolve({ msg, text });
+      }
+    };
+    conn.ev.on("messages.upsert", handler);
+    setTimeout(() => {
+      conn.ev.off("messages.upsert", handler);
+      reject(new Error("Reply timeout"));
+    }, timeout);
+  });
+}
+
+// ───────── Command ─────────
 cmd({
-  pattern: "yta",
-  alias: ["ytsong", "ytaudio", "song", "audio"],
-  desc: "🎧 Download YouTube Audio via Senal YT DL",
-  category: "download",
-  react: "🎵",
+  pattern: "moviesub",
+  desc: "Search and download movies/series from Srihub",
+  category: "downloader",
+  react: "🔍",
   filename: __filename
 }, async (conn, mek, m, { from, q, reply }) => {
   try {
-    if (!q) return reply("❗ Please provide a YouTube link or song name.");
+    if (!q) return reply("❗ Example: .moviesub Stranger");
 
-    await reply("⏳ *Searching YouTube... Please wait!*");
+    // 1️⃣ Search
+    const searchRes = await axios.get(`https://api.srihub.store/movie/moviesub?q=${encodeURIComponent(q)}`);
+    const results = searchRes.data?.result;
+    if (!results || results.length === 0) return reply("❌ No results found");
 
-    const search = await yts(q);
-    const data = search.videos[0];
-    if (!data?.videoId) return reply("❌ No results found.");
+    // 2️⃣ Send list
+    let listText = `🎬 *Srihub Results*\n\n`;
+    results.slice(0, 10).forEach((v, i) => {
+      listText += `*${i+1}.* ${v.title}\n`;
+    });
+    const listMsg = await conn.sendMessage(from, { text: listText + `\nReply number\n${footer}` }, { quoted: mek });
 
-    // 🔗 Fetch MP3 info from API
-    const apiUrl = `https://senalytdl.vercel.app/mp3?id=${data.videoId}`;
-    const { data: res } = await axios.get(apiUrl);
-    if (!res.downloadUrl) return reply("❌ Failed to fetch audio.");
+    // 3️⃣ Wait for selection
+    const { msg: movieMsg, text: movieText } = await waitForReply(conn, from, listMsg.key.id);
+    const index = parseInt(movieText) - 1;
+    if (isNaN(index) || !results[index]) return reply("❌ Invalid number");
 
-    const caption = `
-🎧 *${res.title}*
-👤 *Developer:* Mr Sayura
-💾 *Format:* MP3 (${res.quality} kbps)
-⏱ *Duration:* ${Math.floor(res.duration / 60)}:${(res.duration % 60).toString().padStart(2,"0")}
-🔗 *Source:* YouTube
-    `.trim();
+    const movie = results[index];
 
-    const buttons = [
-      { buttonId: `playnow_${data.videoId}`, buttonText: { displayText: "▶️ Play Audio" }, type: 1 },
-      { buttonId: `down_${data.videoId}`, buttonText: { displayText: "⬇️ Download Audio" }, type: 1 },
-      { buttonId: "api_info", buttonText: { displayText: "ℹ️ API Info" }, type: 1 }
-    ];
+    // 4️⃣ Fetch movie/series info
+    const infoRes = await axios.get(`https://api.srihub.store/movie/moviesubdl?url=${encodeURIComponent(movie.url)}`);
+    const info = infoRes.data?.result;
+    if (!info) return reply("❌ Failed to get info");
 
-    await conn.sendMessage(from, {
-      image: { url: res.thumbnail },
-      caption,
-      footer: "🚀 Powered by Sayura YT DL",
-      buttons,
-      headerType: 1 // ✅ must be 1 for buttons
-    }, { quoted: mek });
-
-  } catch (err) {
-    console.error("Error in .yta command:", err);
-    reply("❌ An error occurred while processing the song.");
-  }
-});
-
-// 🔘 Button click handler using Baileys RC9 events
-conn.ev.on('messages.upsert', async ({ messages, type }) => {
-  try {
-    const msg = messages[0];
-    if (!msg.message?.buttonsResponseMessage) return;
-
-    const btnId = msg.message.buttonsResponseMessage.selectedButtonId;
-    const from = msg.key.remoteJid;
-    const mek = msg;
-
-    if (isUploading) {
-      await conn.sendMessage(from, { text: '*A song is already being sent. Please wait ⏳*' }, { quoted: mek });
-      return;
+    let infoText = `🎬 *${movie.title}*`;
+    if(movie.year) infoText += `\n📅 Year: ${movie.year}`;
+    infoText += `\n\n*Episodes:*`;
+    if(info.seasons && info.seasons.length > 0) {
+      info.seasons[0].episodes.forEach((e,i)=>{
+        infoText += `\n*${i+1}.* ${e.title}`;
+      });
     }
 
-    // ▶️ Play Audio
-    if (btnId.startsWith("playnow_")) {
-      const videoId = btnId.split("_")[1];
-      await conn.sendMessage(from, { text: "⏳ *Fetching and sending audio...*" }, { quoted: mek });
+    const infoMsg = await conn.sendMessage(from, { text: infoText + `\n\nReply episode number\n${footer}` }, { quoted: movieMsg });
 
-      const { data: res } = await axios.get(`https://senalytdl.vercel.app/mp3?id=${videoId}`);
-      if (!res.downloadUrl) return conn.sendMessage(from, { text: "❌ Failed to fetch audio." }, { quoted: mek });
+    // 5️⃣ Wait for episode selection
+    const { msg: epMsg, text: epText } = await waitForReply(conn, from, infoMsg.key.id);
+    const epIndex = parseInt(epText) - 1;
+    if(isNaN(epIndex) || !info.seasons[0].episodes[epIndex]) return reply("❌ Invalid episode number");
 
-      isUploading = true;
-      await conn.sendMessage(from, {
-        audio: { url: res.downloadUrl },
-        mimetype: "audio/mpeg",
-        ptt: false,
-        caption: `🎵 *${res.title}*\n✅ Sent by *Mr Sayura*`
-      }, { quoted: mek });
-      isUploading = false;
-    }
+    const episode = info.seasons[0].episodes[epIndex];
+    let epMsgText = `🎬 *${episode.title}*\n\n🎥 Watch here: ${episode.iframe || "No iframe link available"}`;
+    await conn.sendMessage(from, { text: epMsgText }, { quoted: epMsg });
 
-    // ⬇️ Download as MP3 document
-    else if (btnId.startsWith("down_")) {
-      const videoId = btnId.split("_")[1];
-      await conn.sendMessage(from, { text: "⏳ *Downloading audio...*" }, { quoted: mek });
-
-      const { data: res } = await axios.get(`https://senalytdl.vercel.app/mp3?id=${videoId}`);
-      if (!res.downloadUrl) return conn.sendMessage(from, { text: "❌ Failed to fetch audio." }, { quoted: mek });
-
-      isUploading = true;
-      await conn.sendMessage(from, {
-        document: { url: res.downloadUrl },
-        mimetype: "audio/mpeg",
-        fileName: `${res.title}.mp3`,
-        caption: "✅ MP3 file sent by *Mr Sayura*"
-      }, { quoted: mek });
-      isUploading = false;
-    }
-
-    // ℹ️ API Info
-    else if (btnId === "api_info") {
-      await conn.sendMessage(from, {
-        text: `
-🧠 *Sayura YT DL API Info*
-👨‍💻 Developer: Mr Sayura
-📦 Project: Sayura YT DL v2.0
-🔗 Base URL: https://senalytdl.vercel.app/
-🎵 Endpoint: /mp3?id=VIDEO_ID
-        `.trim()
-      }, { quoted: mek });
-    }
-
-  } catch (err) {
-    console.error("Button handler error:", err);
+  } catch (e) {
+    console.error("Srihub ERROR:", e);
+    reply("⚠️ Error:\n" + e.message);
   }
 });
