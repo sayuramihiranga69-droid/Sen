@@ -60,7 +60,7 @@ async function sendDocFile(conn, from, info, filePath, quality, quoted) {
 
 // ───────── Command ─────────
 cmd({
-    pattern: "sinhalasub3",
+    pattern: "sinhalasubt",
     desc: "Search & download Sinhala subtitles movie with full 4-step endpoints",
     category: "downloader",
     react: "🔍",
@@ -97,7 +97,7 @@ cmd({
 
         const pix = info.downloads?.pixeldrain;
         if (!pix || !pix.length) return reply("❌ No Pixeldrain links found");
-       edbcfabbca5a9750 console.log("📌 Available Pixeldrain links:", pix.map(d => ({ quality: d.quality, url: d.url })));
+        console.log("📌 Available Pixeldrain links:", pix.map(d => ({ quality: d.quality, url: d.url })));
 
         let qualityList = "";
         pix.forEach((d,i)=>{ qualityList += `*${i+1}.* ${d.quality} (${d.size})\n`; });
