@@ -1,306 +1,117 @@
-const { cmd } = require("../command");
-const { fetchJson } = require('../lib/functions');
+const { cmd } = require('../command');
+const axios = require('axios');
 
-const tharuzz_footer = "> Powerd by 𝙳𝙰𝚁𝙺-𝙺𝙽𝙸𝙶𝙷𝚃-𝚇𝙼𝙳";
+const cinesubz_footer = "> Powerd by CineSubz-XMD";
 
-
-
-
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 1️⃣ SEARCH COMMAND WITH REPLY SYSTEM
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 cmd({
-  pattern: "save",
-  react: "💾",
-  desc: "Save WhatsApp status",
-  category: "utility",
-  filename: __filename
-}, async (client, message, match, { from }) => {
-  try {
-
-    // status check
-    if (!message.quoted || message.quoted.key.remoteJid !== "status@broadcast") {
-      return await client.sendMessage(from, {
-        text: "🍁 *Please reply to a WhatsApp STATUS!*"
-      }, { quoted: message });
-    }
-
-    const quoted = message.quoted;
-    const buffer = await quoted.download();
-    const mtype = quoted.mtype;
-
-    let content = {};
-
-    if (mtype === "imageMessage") {
-      content = {
-        image: buffer,
-        caption: "📥 *Status Saved*"
-      };
-    } 
-    else if (mtype === "videoMessage") {
-      content = {
-        video: buffer,
-        caption: "📥 *Status Saved*"
-      };
-    } 
-    else {
-      return await client.sendMessage(from, {
-        text: "❌ Only image & video status supported"
-      }, { quoted: message });
-    }
-
-    await client.sendMessage(from, content, { quoted: message });
-
-  } catch (e) {
-    console.error(e);
-    await client.sendMessage(from, {
-      text: "❌ Failed to save status"
-    }, { quoted: message });
-  }
-});
-
-cmd(
-    {
-        pattern: "xnxx",
-        use: ".xnxx <xnxx video name>",
-        react: "🔞",
-        desc: "Search and download xnxx.com 18+ videos.",
-        category: "download",
-        filename: __filename
-    }, async (conn, mek, m, {q, from, reply}) => {
-        
-        const react = async (msgKey, emoji) => {
+    pattern: "cinesubsk",
+    alias: ["moviesearch", "csearch"],
+    desc: "Search for movies/TV shows on CineSubz",
+    category: "downloader",
+    react: "🔍",
+    filename: __filename
+}, async (conn, mek, m, { from, q, reply }) => {
     try {
-      await conn.sendMessage(from, {
-        react: {
-          text: emoji,
-          key: msgKey
-        }
-      });
-    } catch (e) {
-      console.error("Reaction error:", e.message);
-    }
-  };
-        try {
-            
-            if (!q) {
-                await reply("Please enter xnxx.com video name.")
-            }
-            
-            const xnxxSearchapi = await fetchJson(`https://tharuzz-ofc-api-v2.vercel.app/api/search/xvsearch?query=${q}`);
-            
-            if (!xnxxSearchapi.result.xvideos) {
-                await reply("No result found you enter xnxx video name.")
-            }
-            
-            let list = "🔍 Xnxx Search Results.🔞\n\n🔢 *Reply Below Number.*\n\n";
-            
-            xnxxSearchapi.result.xvideos.forEach((xnxx, i) => {
-            list += `*\`${i + 1}\` | | ${xnxx.title || "No title"}*\n`;
-          });
-          
-          const listMsg = await conn.sendMessage(from, { text: list + "\n🔢 *reply with the number to Choose a video*\n\n" + tharuzz_footer }, { quoted: mek });
-          const listMsgId = listMsg.key.id;
-          
-          conn.ev.on("messages.upsert", async (update) => {
-              
-              const msg = update?.messages?.[0];
-              if (!msg?.message) return;
+        if (!q) return reply("❗ Please provide a search query\nExample: .cinesearch Avatar");
 
-              const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
-              const isReplyToList = msg?.message?.extendedTextMessage?.contextInfo?.stanzaId === listMsgId;
-              if (!isReplyToList) return;
-              
-              const index = parseInt(text.trim()) - 1;
-              if (isNaN(index) || index < 0 || index >= xnxxSearchapi.result.xvideos.length) return reply("❌ *`ɪɴᴠᴀʟɪᴅ ɴᴜᴍʙᴇʀ ᴘʟᴇᴀꜱᴇ ᴇɴᴛᴇʀ ᴠᴀʟɪᴅ  ɴᴜᴍʙᴇʀ.`*");
-              await react(msg.key, '✅');
-              
-              const chosen = xnxxSearchapi.result.xvideos[index];
-              
-              const xnxxDownloadapi = await fetchJson(`https://tharuzz-ofc-api-v2.vercel.app/api/download/xvdl?url=${chosen.link}`);
-              
-              const infoMap = xnxxDownloadapi?.result;
-              
-              const downloadUrllow = xnxxDownloadapi?.result?.dl_Links?.lowquality;
-              
-              const downloadUrlhigh = xnxxDownloadapi?.result?.dl_Links?.highquality;
-              
-              const askType = await conn.sendMessage(
-            from,{
-                image: {url: infoMap.thumbnail },
-                caption: `🔍 *Xnxx Video Info.* 🔞\n\n` +
-                `📑 *Title:* ${infoMap.title}\n` + 
-                `📝 *Description:* ${infoMap.description}\n` + 
-                `⏰ *Duration:* ${infoMap.duration}\n\n` +
-                `🔢 *Reply Below Number:*\n\n` +
-                `1️⃣ *Video High Quality*\n` +
-                `1️⃣ *Video Low Quality*\n\n` + tharuzz_footer
-            }, { quoted:msg }
+        await reply("🔍 Searching CineSubz...");
+
+        const url = `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-search?q=${encodeURIComponent(q)}&apikey=deb4e2d4982c6bc2`;
+        const { data } = await axios.get(url);
+
+        if (!data.status || !data.data || data.data.length === 0) {
+            return reply("❌ No results found.");
+        }
+
+        let message = `🎬 *CineSubz Search Results*\n\n🔎 Query: *${q}*\n📊 Found: ${data.data.length} results\n\n`;
+
+        data.data.slice(0, 10).forEach((item, index) => {
+            message += `*${index + 1}. ${item.title}*\n`;
+            if (item.type) message += `   📁 Type: ${item.type}\n`;
+            if (item.quality) message += `   📺 Quality: ${item.quality}\n`;
+            if (item.rating) message += `   ⭐ Rating: ${item.rating}\n`;
+            if (item.link) message += `   🔗 ${item.link}\n\n`;
+        });
+
+        const listMsg = await conn.sendMessage(
+            from,
+            { text: message + "\n🔢 *Reply with the number to choose a movie*\n\n" + cinesubz_footer },
+            { quoted: mek }
         );
-            
-            const typeMsgId = askType.key.id; 
-            
-            conn.ev.on("messages.upsert", async (tUpdate) => {
-                
-                const tMsg = tUpdate?.messages?.[0];
-            if (!tMsg?.message) return;
 
-            const tText = tMsg.message?.conversation || tMsg.message?.extendedTextMessage?.text;
-            const isReplyToType = tMsg?.message?.extendedTextMessage?.contextInfo?.stanzaId === typeMsgId;
-            if (!isReplyToType) return;
-       
-            await react(tMsg.key, tText.trim() === "1" ? '🎥' : tText.trim() === "2" ? '🎥' : '❓');
-            
-            if (tText.trim() === "1") {
-                await conn.sendMessage(
-                    from,
-                    {
-                      video: {url: downloadUrlhigh },
-                      caption: `*🔞 Here is your xnxx high quality video.*\n\n> ${infoMap.title}`
-                    }, {quoted: tMsg}
-                )
-            } else if (tText.trim() === "2") {
-                await conn.sendMessage(
-                    from, {
-                        video: {url: downloadUrllow },
-                        caption: `*🔞 Here is your xnxx low quality video.*\n\n> ${infoMap.title}`
+        const listMsgId = listMsg.key.id;
 
-                    }, {quoted: tMsg}
-                )
-            } else {
-                await conn.sendMessage(from, { text: "❌ *`ɪɴᴠᴀʟɪᴅᴇ ɪɴᴘᴜᴛ. 1 ꜰᴏʀ ᴠɪᴅᴇᴏ high quality ᴛʏᴘᴇ / 2 ꜰᴏʀ video low quality ᴛʏᴘᴇ`*" }, { quoted: tMsg });
+        // Wait for reply
+        conn.ev.on("messages.upsert", async (update) => {
+            const msg = update?.messages?.[0];
+            if (!msg?.message) return;
+
+            const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
+            const isReplyToList = msg?.message?.extendedTextMessage?.contextInfo?.stanzaId === listMsgId;
+            if (!isReplyToList) return;
+
+            const index = parseInt(text.trim()) - 1;
+            if (isNaN(index) || index < 0 || index >= data.data.length) {
+                return reply("❌ Invalid number. Please reply with a valid number from the list.");
             }
-            });
-          });
-        } catch (e) {
-            console.log(e);
-            await reply("*❌ Error: " + e + "*")
-        }
-    }
-);
 
+            const chosen = data.data[index];
 
-cmd(
-    {
-        pattern: "xvideo",
-        use: ".xvideo <video name>",
-        react: "🔞",
-        desc: "Search and download xnxx.com 18+ videos.",
-        category: "download",
-        filename: __filename
-    },
-    async (conn, mek, m, { q, from, reply }) => {
-        const react = async (msgKey, emoji) => {
-            try {
-                await conn.sendMessage(from, { react: { text: emoji, key: msgKey } });
-            } catch (e) {
-                console.error("Reaction error:", e.message);
-            }
-        };
+            // Fetch movie details
+            const detailsUrl = `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-info?url=${encodeURIComponent(chosen.link)}&apikey=deb4e2d4982c6bc2`;
+            const detailsRes = await axios.get(detailsUrl);
+            const info = detailsRes.data?.data;
+            if (!info) return reply("❌ Failed to fetch movie details.");
 
-        try {
-            if (!q) return await reply("❌ Please enter xnxx.com video name!");
+            let msgText = `🎬 *${info.title}*\n\n`;
+            if (info.year) msgText += `📅 Year: ${info.year}\n`;
+            if (info.quality) msgText += `📺 Quality: ${info.quality}\n`;
+            if (info.rating) msgText += `⭐ Rating: ${info.rating}\n`;
+            if (info.duration) msgText += `⏱ Duration: ${info.duration}\n`;
+            if (info.country) msgText += `🌍 Country: ${info.country}\n`;
+            if (info.directors) msgText += `🎬 Directors: ${info.directors}\n\n`;
 
-            // Search API
-            const searchRes = await fetchJson(
-                `https://api-aswin-sparky.koyeb.app/api/search/xnxx?search=${encodeURIComponent(q)}`
-            );
-
-            const results = searchRes?.result?.result;
-            if (!results || results.length === 0) return await reply("😔 No results found.");
-
-            let list = "🔍 *Xvideo Search Results* 🔞\n\n🔢 *Reply Below Number.*\n\n";
-            results.forEach((vid, i) => {
-                list += `*\`${i + 1}\` | | ${vid.title || "No title"}*\n`;
-            });
-
-            const listMsg = await conn.sendMessage(
-                from,
-                { text: list + "\n🔢 *reply with the number to Choose a video*\n\n" + tharuzz_footer },
-                { quoted: mek }
-            );
-
-            const listMsgId = listMsg.key.id;
-
-            conn.ev.on("messages.upsert", async (update) => {
-                const msg = update?.messages?.[0];
-                if (!msg?.message) return;
-
-                const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
-                const isReplyToList =
-                    msg?.message?.extendedTextMessage?.contextInfo?.stanzaId === listMsgId;
-                if (!isReplyToList) return;
-
-                const index = parseInt(text.trim()) - 1;
-                if (isNaN(index) || index < 0 || index >= results.length)
-                    return reply("❌ Invalid number! Please choose a valid video.");
-
-                await react(msg.key, "✅");
-                const chosen = results[index];
-
-                // Download API
-                const dlRes = await fetchJson(
-                    `https://api-aswin-sparky.koyeb.app/api/downloader/xnxx?url=${encodeURIComponent(
-                        chosen.link
-                    )}`
-                );
-
-                const info = dlRes?.data;
-                if (!info) return reply("⚠️ Could not fetch video download info.");
-
-                const high = info.files?.high;
-                const low = info.files?.low;
-
-                const askType = await conn.sendMessage(
-                    from,
-                    {
-                        image: { url: info.image },
-                        caption:
-                            `🔍 *Xnxx Video Info.* 🔞\n\n` +
-                            `📑 *Title:* ${info.title}\n` +
-                            `📝 *Info:* ${info.info}\n` +
-                            `⏰ *Duration:* ${info.duration || "Unknown"}\n\n` +
-                            `🔢 *Reply Below Number.*\n\n1️⃣ *Video High Quality*\n2️⃣ *Video Low Quality*\n\n` +
-                            tharuzz_footer
-                    },
-                    { quoted: msg }
-                );
-
-                const typeMsgId = askType.key.id;
-
-                conn.ev.on("messages.upsert", async (tUpdate) => {
-                    const tMsg = tUpdate?.messages?.[0];
-                    if (!tMsg?.message) return;
-
-                    const tText =
-                        tMsg.message?.conversation || tMsg.message?.extendedTextMessage?.text;
-                    const isReplyToType =
-                        tMsg?.message?.extendedTextMessage?.contextInfo?.stanzaId === typeMsgId;
-                    if (!isReplyToType) return;
-
-                    await react(tMsg.key, tText.trim() === "1" || tText.trim() === "2" ? "🎥" : "❓");
-
-                    if (tText.trim() === "1" && high) {
-                        await conn.sendMessage(
-                            from,
-                            { video: { url: high }, caption: `*🔞 Here is your high-quality video.*\n${info.title}` },
-                            { quoted: tMsg }
-                        );
-                    } else if (tText.trim() === "2" && low) {
-                        await conn.sendMessage(
-                            from,
-                            { video: { url: low }, caption: `*🔞 Here is your low-quality video.*\n${info.title}` },
-                            { quoted: tMsg }
-                        );
-                    } else {
-                        await conn.sendMessage(
-                            from,
-                            { text: "❌ Invalid input. Reply 1 for high quality or 2 for low quality." },
-                            { quoted: tMsg }
-                        );
-                    }
+            if (info.downloads && info.downloads.length > 0) {
+                msgText += `📥 *Available Download Links:*\n`;
+                info.downloads.forEach((dl, idx) => {
+                    msgText += `*${idx + 1}. ${dl.quality}* (${dl.size})\n`;
                 });
+                msgText += `\n🔢 Reply with the number to get the download link.\n` + cinesubz_footer;
+            } else {
+                msgText += `❌ No download links available.`;
+            }
+
+            const detailsMsg = await conn.sendMessage(
+                from,
+                info.image ? { image: { url: info.image }, caption: msgText } : { text: msgText },
+                { quoted: msg }
+            );
+
+            const detailsMsgId = detailsMsg.key.id;
+
+            // Wait for download reply
+            conn.ev.on("messages.upsert", async (dlUpdate) => {
+                const dlMsg = dlUpdate?.messages?.[0];
+                if (!dlMsg?.message) return;
+
+                const dlText = dlMsg.message?.conversation || dlMsg.message?.extendedTextMessage?.text;
+                const isReplyToDetails = dlMsg?.message?.extendedTextMessage?.contextInfo?.stanzaId === detailsMsgId;
+                if (!isReplyToDetails) return;
+
+                const dlIndex = parseInt(dlText.trim()) - 1;
+                if (isNaN(dlIndex) || dlIndex < 0 || dlIndex >= info.downloads.length) {
+                    return reply("❌ Invalid number. Reply with a valid download number.", dlMsg);
+                }
+
+                const dlChosen = info.downloads[dlIndex];
+                await conn.sendMessage(from, { text: `📥 Download link:\n${dlChosen.link}` }, { quoted: dlMsg });
             });
-        } catch (e) {
-            console.error(e);
-            await reply(`❌ Error: ${e.message}`);
-        }
+        });
+    } catch (e) {
+        console.error("CineSubz error:", e);
+        reply(`❌ Error: ${e.message}`);
     }
-);
+});
