@@ -1,95 +1,46 @@
-const config = require('../config');
-const {cmd , commands} = require('../command');
-const { fetchJson } = require('../lib/functions')
-const axios = require('axios');
-const cheerio = require('cheerio');
+const axios = require("axios");
+const { cmd } = require("../command");
 
 cmd({
-    pattern: "xv",
-    alias: ["xvideo"],
-    use: '.xvid <query>',
-    react: "🔞",
-    desc: "xvideo download",
-    category: "download",
-    filename: __filename
-}, async (messageHandler, context, quotedMessage, { from, q, reply }) => {
-    try {
-        if (!q) return reply('⭕ *Please Provide Search Terms.*');
+  pattern: "pixeldraint",
+  alias: ["pix"],
+  desc: "Download PixelDrain files",
+  react: "🌐",
+  category: "download",
+  filename: __filename
+}, async (conn, m, store, { from, q, reply }) => {
+  try {
+    if (!q) return reply("❌ Please provide a PixelDrain link.");
 
-        let res = await fetchJson(`https://raganork-network.vercel.app/api/xvideos/search?query=${q}`);
-        
-        if (!res || !res.result || res.result.length === 0) return reply("N_FOUND");
+    await conn.sendMessage(from, { react: { text: "⬇️", key: m.key } });
 
-        const data = res.result.slice(0, 10);
-        
-        if (data.length < 1) return await messageHandler.sendMessage(from, { text: "⭕ *I Couldn't Find Anything 🙄*" }, { quoted: quotedMessage });
+    const apiUrl = `https://api-dark-shan-yt.koyeb.app/download/pixeldrain?url=${encodeURIComponent(q)}&apikey=09acaa863782cc46`;
 
-        let message = `*🔞  Sayura MD XVIDEO DOWNLOADER  🔞*\n\n`;
-        let options = '';
+    const { data } = await axios.get(apiUrl);
 
-        data.forEach((v, index) => {
-            options += `${index + 1}. *${v.title}*\n\n`;
-        });
-        
-        message += options;
-        message += `> ⚜️ _𝐃𝐞𝐯𝐞𝐥𝐨𝐩𝐞𝐝_ *- :* *_Mr Sayura_*\n\n`;
-
-        const sentMessage = await messageHandler.sendMessage(from, {
-            image: { url: `https://i.ibb.co/ntvzPr8/s-Wuxk4b-KHr.jpg` },
-            caption: message
-        }, { quoted: quotedMessage });
-
-        session[from] = {
-            searchResults: data,
-            messageId: sentMessage.key.id,
-        };
-
-        const handleUserReply = async (update) => {
-            const userMessage = update.messages[0];
-
-            if (!userMessage.message.extendedTextMessage ||
-                userMessage.message.extendedTextMessage.contextInfo.stanzaId !== sentMessage.key.id) {
-                return;
-            }
-
-            const userReply = userMessage.message.extendedTextMessage.text.trim();
-            const videoIndexes = userReply.split(',').map(x => parseInt(x.trim()) - 1);
-
-            for (let index of videoIndexes) {
-                if (isNaN(index) || index < 0 || index >= data.length) {
-                    return reply("⭕ *Please Enter Valid Numbers From The List.*");
-                }
-            }
-
-            for (let index of videoIndexes) {
-                const selectedVideo = data[index];
-
-                try {
-                    let downloadRes = await fetchJson(`https://raganork-network.vercel.app/api/xvideos/download?url=${selectedVideo.url}`);
-                    let videoUrl = downloadRes.url;
-
-                    if (!videoUrl) {
-                        return reply(`⭕ *Failed To Fetch Video* for "${selectedVideo.title}".`);
-                    }
-
-                    await messageHandler.sendMessage(from, {
-                        video: { url: videoUrl },
-                        caption: `${selectedVideo.title}\n\n> ⚜️ _𝐃𝐞𝐯𝐞𝐥𝐨𝐩𝐞𝐝_ *- :* *_Mr Sayura_*`
-                    });
-
-                } catch (err) {
-                    console.error(err);
-                    return reply(`⭕ *An Error Occurred While Downloading "${selectedVideo.title}".*`);
-                }
-            }
-
-            delete session[from];
-        };
-
-        messageHandler.ev.on("messages.upsert", handleUserReply);
-
-    } catch (error) {
-        console.error(error);
-        await messageHandler.sendMessage(from, { text: '⭕ *Error Occurred During The Process!*' }, { quoted: quotedMessage });
+    // ✅ Check API response
+    if (!data.status || !data.data || !data.data.success) {
+      return reply("⚠️ Invalid PixelDrain link or API error.");
     }
+
+    const file = data.data;
+
+    await conn.sendMessage(from, { react: { text: "⬆️", key: m.key } });
+
+    await conn.sendMessage(from, {
+      document: { url: file.download },
+      fileName: file.filename || "pixeldrain_file.mp4",
+      mimetype: "application/octet-stream",
+      caption:
+        `📁 *File:* ${file.filename}\n` +
+        `📦 *Size:* ${file.size}\n\n` +
+        `*© Powered By 𝙳𝙰𝚁𝙺-𝙺𝙽𝙸𝙶𝙷𝚃-𝚇𝙼𝙳*`
+    }, { quoted: m });
+
+    await conn.sendMessage(from, { react: { text: "✅", key: m.key } });
+
+  } catch (e) {
+    console.error("PixelDrain Error:", e);
+    reply("❌ Failed to download PixelDrain file.");
+  }
 });
