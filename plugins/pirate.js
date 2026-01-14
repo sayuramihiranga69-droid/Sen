@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const sharp = require("sharp");
 
-const MEGA_API_KEY = "edbcfabbca5a9750"; // Dark-Shan API key
+const MEGA_API_KEY = "edbcfabbca5a9750";
 const FOOTER = "✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌☢️☘";
 
 // ───────── Wait for reply helper ─────────
@@ -15,9 +15,7 @@ function waitForReply(conn, from, replyToId, timeout = 120000) {
             if (!msg?.message) return;
 
             const ctx = msg.message?.extendedTextMessage?.contextInfo;
-            const text =
-                msg.message.conversation ||
-                msg.message?.extendedTextMessage?.text;
+            const text = msg.message.conversation || msg.message?.extendedTextMessage?.text;
 
             if (msg.key.remoteJid === from && ctx?.stanzaId === replyToId) {
                 conn.ev.off("messages.upsert", handler);
@@ -33,23 +31,20 @@ function waitForReply(conn, from, replyToId, timeout = 120000) {
     });
 }
 
-// ───────── Thumbnail maker ─────────
+// ───────── Make thumbnail ─────────
 async function makeThumbnail(url) {
     try {
         const img = await axios.get(url, { responseType: "arraybuffer" });
-        return await sharp(img.data)
-            .resize(300)
-            .jpeg({ quality: 65 })
-            .toBuffer();
+        return await sharp(img.data).resize(300).jpeg({ quality: 65 }).toBuffer();
     } catch {
         return null;
     }
 }
 
-// ───────── Pirate command ─────────
+// ───────── Pirate search + download ─────────
 cmd({
     pattern: "pirate",
-    desc: "Search Pirate movies and auto download Mega file",
+    desc: "Search Pirate movies + info card + Mega qualities + auto download",
     category: "downloader",
     react: "🎬",
     filename: __filename
@@ -59,99 +54,105 @@ cmd({
 
         await reply("🔍 Searching Pirate movies...");
 
-        // 1️⃣ SEARCH
+        // 1️⃣ Search API
         const searchRes = await axios.get(
             `https://ty-opal-eta.vercel.app/movie/pirate/search?text=${encodeURIComponent(q)}`
         );
-
         const results = searchRes.data?.result?.data;
         if (!results?.length) return reply("❌ No results found");
 
-        let list = "🎬 *Search Results*\n\n";
+        // 2️⃣ List top 10
+        let listText = "🎬 *Pirate Search Results*\n\n";
         results.slice(0, 10).forEach((v, i) => {
-            list += `*${i + 1}.* ${v.title}\n`;
+            listText += `*${i + 1}.* ${v.title} | ${v.imdb || "IMDB N/A"}\n`;
         });
-        list += `\nReply with number\n\n${FOOTER}`;
+        listText += `\nReply with the number to select.\n\n${FOOTER}`;
+        const listMsg = await conn.sendMessage(from, { text: listText }, { quoted: m });
 
-        const listMsg = await conn.sendMessage(from, { text: list }, { quoted: m });
+        // 3️⃣ Wait for user selection
+        const selText = await waitForReply(conn, from, listMsg.key.id);
+        const index = parseInt(selText) - 1;
+        if (isNaN(index) || !results[index]) return reply("❌ Invalid number");
 
-        // 2️⃣ SELECT MOVIE
-        const selIndex = parseInt(await waitForReply(conn, from, listMsg.key.id)) - 1;
-        if (!results[selIndex]) return reply("❌ Invalid selection");
+        const movie = results[index];
 
-        const movie = results[selIndex];
-
-        // 3️⃣ MOVIE DETAILS
-        const detailRes = await axios.get(
+        // 4️⃣ Get movie details
+        const detailsRes = await axios.get(
             `https://ty-opal-eta.vercel.app/movie/pirate/movie?url=${encodeURIComponent(movie.link)}`
         );
+        const data = detailsRes.data?.result?.data;
+        if (!data) return reply("❌ Failed to fetch movie details");
 
-        const data = detailRes.data?.result?.data;
-        if (!data) return reply("❌ Movie details not found");
-
-        // 4️⃣ FILTER MEGA LINKS
-        const megaLinks = data.dl_links?.filter(v => v.link.includes("mega.nz"));
-        if (!megaLinks?.length) return reply("❌ No Mega links available");
-
-        let qText = "📥 *Select Quality*\n\n";
-        megaLinks.forEach((v, i) => {
-            qText += `*${i + 1}.* ${v.quality} (${v.size})\n`;
-        });
-        qText += `\nReply with number\n\n${FOOTER}`;
-
-        const qMsg = await conn.sendMessage(from, { text: qText }, { quoted: m });
-
-        // 5️⃣ SELECT QUALITY
-        const qIndex = parseInt(await waitForReply(conn, from, qMsg.key.id)) - 1;
-        if (!megaLinks[qIndex]) return reply("❌ Invalid quality");
-
-        const megaUrl = megaLinks[qIndex].link;
-
-        // 6️⃣ INFO CARD
         const thumb = data.image ? await makeThumbnail(data.image) : null;
 
-        await conn.sendMessage(from, {
-            image: { url: data.image },
-            caption: `🎬 *${data.title}*\n🎞️ ${megaLinks[qIndex].quality}\n\n⬆️ Downloading...\n\n${FOOTER}`
-        }, { quoted: m });
+        // 5️⃣ Send movie info card
+        let infoText = `🎬 *${data.title}*\n`;
+        if (data.imdb) infoText += `⭐ IMDB: ${data.imdb}\n`;
+        if (data.tmdb) infoText += `⭐ TMDB: ${data.tmdb}\n`;
+        infoText += `📅 Date: ${data.date || "N/A"}\n`;
+        infoText += `⏱️ Runtime: ${data.runtime || "N/A"}\n`;
+        infoText += `🌎 Country: ${data.country || "N/A"}\n`;
+        infoText += `🎭 Genres: ${data.category?.join(", ") || "N/A"}\n\n`;
+        infoText += `${data.description?.slice(0, 500) || ""}...\n\n${FOOTER}`;
 
-        // 7️⃣ MEGA API → REAL FILE LINK
-        const megaApi = await axios.get(
-            `https://api-dark-shan-yt.koyeb.app/download/meganz?url=${encodeURIComponent(megaUrl)}&apikey=${MEGA_API_KEY}`
+        await conn.sendMessage(from, { image: { url: data.image }, caption: infoText }, { quoted: m });
+
+        // 6️⃣ Filter Mega links only
+        const megaLinks = data.dl_links?.filter(dl => dl.link.includes("mega.nz"));
+        if (!megaLinks?.length) return reply("❌ No Mega links available");
+
+        // 7️⃣ List Mega qualities
+        let qualityText = "📥 *Available Mega Qualities*\n\n";
+        megaLinks.forEach((dl, i) => {
+            qualityText += `*${i + 1}.* ${dl.quality} (${dl.size})\n`;
+        });
+        qualityText += `\nReply with the number to download\n\n${FOOTER}`;
+        const qualityMsg = await conn.sendMessage(from, { text: qualityText }, { quoted: m });
+
+        // 8️⃣ Wait for quality selection
+        const qSel = await waitForReply(conn, from, qualityMsg.key.id);
+        const qIndex = parseInt(qSel) - 1;
+        if (isNaN(qIndex) || !megaLinks[qIndex]) return reply("❌ Invalid quality number");
+
+        const file = megaLinks[qIndex];
+
+        // 9️⃣ Download via Dark-Shan Mega API
+        await reply(`🔄 Downloading *${file.quality}*...`);
+        const apiRes = await axios.get(
+            `https://api-dark-shan-yt.koyeb.app/download/meganz?url=${encodeURIComponent(file.link)}&apikey=${MEGA_API_KEY}`
         );
 
-        const file = megaApi.data?.data?.result?.[0];
-        if (!file?.download) return reply("❌ Mega download failed");
+        const dlFile = apiRes.data?.data?.result?.[0];
+        if (!dlFile?.download) return reply("❌ Failed to get download link");
 
-        // 8️⃣ DOWNLOAD FILE
-        const tempPath = path.join(__dirname, file.name);
+        const tempPath = path.join(__dirname, dlFile.name);
         const writer = fs.createWriteStream(tempPath);
 
-        const stream = await axios({
-            url: file.download,
+        const downloadRes = await axios({
+            url: dlFile.download,
             method: "GET",
             responseType: "stream"
         });
 
-        stream.data.pipe(writer);
-        await new Promise((res, rej) => {
-            writer.on("finish", res);
-            writer.on("error", rej);
+        downloadRes.data.pipe(writer);
+
+        await new Promise((resolve, reject) => {
+            writer.on("finish", resolve);
+            writer.on("error", reject);
         });
 
-        // 9️⃣ SEND DOCUMENT
+        // 10️⃣ Send file
         await conn.sendMessage(from, {
             document: fs.readFileSync(tempPath),
-            fileName: file.name,
+            fileName: dlFile.name,
             mimetype: "video/x-matroska",
-            jpegThumbnail: thumb || undefined,
-            caption: `📥 *Download Complete*\n\n${FOOTER}`
+            caption: `📥 *Downloaded: ${dlFile.name}*\n📦 Size: ${(dlFile.size / 1024 / 1024).toFixed(2)} MB\n\n${FOOTER}`
         }, { quoted: m });
 
         fs.unlinkSync(tempPath);
 
     } catch (e) {
-        console.error("PIRATE ERROR:", e);
+        console.error("Pirate ERROR:", e);
         reply("⚠️ Error: " + e.message);
     }
 });
