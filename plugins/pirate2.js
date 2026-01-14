@@ -1,174 +1,145 @@
 const { cmd } = require("../command");
 const axios = require("axios");
 const sharp = require("sharp");
-const fs = require("fs");
-const path = require("path");
 
 const FOOTER = "✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌☢️☘";
-const MEGA_API_KEY = "edbcfabbca5a9750"; // Dark-Shan API KEY
 
-// ───────── GLOBAL REPLY QUEUE (MULTI USER) ─────────
-const replyQueue = new Map();
+// ───────── User session store ─────────
+const sessions = new Map();
 
-function waitForReply(from, msgId, timeout = 120000) {
+// ───────── Wait for reply helper ─────────
+function waitForReply(conn, from, replyToId, timeout = 120000) {
     return new Promise((resolve, reject) => {
-        const key = `${from}_${msgId}`;
-        const timer = setTimeout(() => {
-            replyQueue.delete(key);
+        const handler = (update) => {
+            const msg = update.messages?.[0];
+            if (!msg?.message) return;
+            const ctx = msg.message?.extendedTextMessage?.contextInfo;
+            const text = msg.message.conversation || msg.message?.extendedTextMessage?.text;
+            if (msg.key.remoteJid === from && ctx?.stanzaId === replyToId) {
+                conn.ev.off("messages.upsert", handler);
+                resolve({ msg, text });
+            }
+        };
+        conn.ev.on("messages.upsert", handler);
+        setTimeout(() => {
+            conn.ev.off("messages.upsert", handler);
             reject(new Error("Reply timeout"));
         }, timeout);
-        replyQueue.set(key, { resolve, timer });
     });
 }
 
-function initReplyListener(conn) {
-    conn.ev.on("messages.upsert", update => {
-        const msg = update.messages?.[0];
-        if (!msg?.message) return;
-
-        const text =
-            msg.message.conversation ||
-            msg.message?.extendedTextMessage?.text;
-
-        const ctx = msg.message?.extendedTextMessage?.contextInfo;
-        if (!ctx?.stanzaId) return;
-
-        const key = `${msg.key.remoteJid}_${ctx.stanzaId}`;
-        if (replyQueue.has(key)) {
-            const { resolve, timer } = replyQueue.get(key);
-            clearTimeout(timer);
-            replyQueue.delete(key);
-            resolve(text.trim());
-        }
-    });
-}
-
-// ───────── THUMBNAIL ─────────
+// ───────── Make thumbnail ─────────
 async function makeThumbnail(url) {
     try {
         const img = await axios.get(url, { responseType: "arraybuffer" });
-        return await sharp(img.data).resize(300).jpeg({ quality: 70 }).toBuffer();
-    } catch {
+        return await sharp(img.data).resize(300).jpeg({ quality: 65 }).toBuffer();
+    } catch (e) {
+        console.log("Thumbnail error:", e.message);
         return null;
     }
 }
 
-// ───────── PIRATE COMMAND ─────────
+// ───────── Pirate search command ─────────
 cmd({
-    pattern: "pirate2",
-    desc: "Pirate.lk search + Mega auto download",
+    pattern: "pirate",
+    desc: "Search Sinhala Movies via Pirate API and send Mega download links only",
     category: "downloader",
     react: "🎬",
-    filename: __filename
+    filename: __filename,
 }, async (conn, mek, m, { from, q, reply }) => {
-
-    initReplyListener(conn);
-
     try {
         if (!q) return reply("❗ Example: .pirate Green");
 
-        await reply("🔍 Searching movies...");
-
-        // 1️⃣ SEARCH
-        const search = await axios.get(
-            `https://ty-opal-eta.vercel.app/movie/pirate/search?text=${encodeURIComponent(q)}`
-        );
-
-        const results = search.data?.result?.data;
+        await reply("🔍 Searching Pirate movies...");
+        const searchRes = await axios.get(`https://ty-opal-eta.vercel.app/movie/pirate/search?text=${encodeURIComponent(q)}`);
+        const results = searchRes.data?.result?.data;
         if (!results?.length) return reply("❌ No results found");
 
-        let list = "🎬 *Search Results*\n\n";
+        // Save session
+        sessions.set(from, { stage: "selectMovie", results });
+
+        // Send top 10 list
+        let listText = "🎬 *Search Results*\n\n";
         results.slice(0, 10).forEach((v, i) => {
-            list += `*${i + 1}.* ${v.title}\n`;
+            listText += `*${i + 1}.* ${v.title} | ${v.imdb || "IMDB N/A"}\n`;
         });
-        list += `\nReply number\n\n${FOOTER}`;
-
-        const listMsg = await conn.sendMessage(from, { text: list }, { quoted: m });
-
-        // 2️⃣ MOVIE SELECT
-        const movieIndex = parseInt(await waitForReply(from, listMsg.key.id)) - 1;
-        if (!results[movieIndex]) return reply("❌ Invalid selection");
-
-        const movie = results[movieIndex];
-
-        // 3️⃣ MOVIE DETAILS
-        const details = await axios.get(
-            `https://ty-opal-eta.vercel.app/movie/pirate/movie?url=${encodeURIComponent(movie.link)}`
-        );
-
-        const data = details.data?.result?.data;
-        if (!data) return reply("❌ Details fetch failed");
-
-        const thumb = await makeThumbnail(data.image);
-
-        let info = `🎬 *${data.title}*\n`;
-        if (data.imdb) info += `⭐ IMDB: ${data.imdb}\n`;
-        info += `⏱️ ${data.runtime}\n`;
-        info += `🎭 ${data.category.join(", ")}\n\n`;
-        info += `${FOOTER}`;
-
-        const infoMsg = await conn.sendMessage(
-            from,
-            { image: { url: data.image }, caption: info },
-            { quoted: m }
-        );
-
-        // 4️⃣ MEGA LINKS ONLY
-        const megaLinks = data.dl_links.filter(v => v.link.includes("mega.nz"));
-        if (!megaLinks.length) return reply("❌ No Mega links");
-
-        let qText = "🎞️ *Select Quality*\n\n";
-        megaLinks.forEach((v, i) => {
-            qText += `*${i + 1}.* ${v.quality} (${v.size})\n`;
-        });
-        qText += `\nReply number\n\n${FOOTER}`;
-
-        const qMsg = await conn.sendMessage(from, { text: qText }, { quoted: infoMsg });
-
-        // 5️⃣ QUALITY SELECT
-        const qIndex = parseInt(await waitForReply(from, qMsg.key.id)) - 1;
-        if (!megaLinks[qIndex]) return reply("❌ Invalid quality");
-
-        const megaUrl = megaLinks[qIndex].link;
-
-        await reply("⬇️ Downloading from Mega...");
-
-        // 6️⃣ MEGA REAL FILE
-        const megaApi = await axios.get(
-            `https://api-dark-shan-yt.koyeb.app/download/meganz?url=${encodeURIComponent(megaUrl)}&apikey=${MEGA_API_KEY}`
-        );
-
-        const file = megaApi.data?.data?.result?.[0];
-        if (!file?.download) return reply("❌ Mega failed");
-
-        const filePath = path.join(__dirname, file.name);
-        const writer = fs.createWriteStream(filePath);
-
-        const stream = await axios({
-            url: file.download,
-            method: "GET",
-            responseType: "stream"
-        });
-
-        stream.data.pipe(writer);
-        await new Promise((res, rej) => {
-            writer.on("finish", res);
-            writer.on("error", rej);
-        });
-
-        // 7️⃣ SEND FILE
-        await conn.sendMessage(from, {
-            document: fs.readFileSync(filePath),
-            fileName: file.name,
-            mimetype: "video/x-matroska",
-            jpegThumbnail: thumb,
-            caption: `🎬 ${data.title}\n📦 ${(file.size / 1024 / 1024).toFixed(1)} MB\n\n${FOOTER}`
-        }, { quoted: m });
-
-        fs.unlinkSync(filePath);
+        listText += `\nReply number to select a movie.\n\n${FOOTER}`;
+        await conn.sendMessage(from, { text: listText }, { quoted: m });
 
     } catch (e) {
-        console.error("PIRATE ERROR:", e);
-        reply("⚠️ Error occurred");
+        console.error("Pirate SEARCH ERROR:", e);
+        reply("⚠️ Error: " + e.message);
+    }
+});
+
+// ───────── Handle replies for multi-stage ─────────
+cmd({
+    pattern: ".*",
+    fromMe: false,
+    desc: "Handle replies for movie selection and quality",
+    filename: __filename,
+}, async (conn, mek, m, { from, reply }) => {
+    try {
+        const session = sessions.get(from);
+        if (!session) return; // No active session
+
+        const text = m.message.conversation || m.message?.extendedTextMessage?.text;
+
+        // Stage 1: Movie selection
+        if (session.stage === "selectMovie") {
+            const index = parseInt(text) - 1;
+            if (isNaN(index) || !session.results[index]) return reply("❌ Invalid number");
+            const movie = session.results[index];
+
+            // Fetch details
+            const detailsRes = await axios.get(`https://ty-opal-eta.vercel.app/movie/pirate/movie?url=${encodeURIComponent(movie.link)}`);
+            const data = detailsRes.data?.result?.data;
+            if (!data) return reply("❌ Failed to fetch movie details");
+
+            session.movie = data;
+            session.stage = "selectQuality";
+            sessions.set(from, session);
+
+            // Send quality options
+            let qualityText = "🎞️ *Select Quality*\n\n";
+            (data.dl_links || []).forEach((dl, i) => {
+                qualityText += `*${i + 1}.* ${dl.quality} (${dl.size})\n`;
+            });
+            qualityText += `\nReply number to select quality.\n\n${FOOTER}`;
+            await conn.sendMessage(from, { text: qualityText }, { quoted: m });
+        }
+
+        // Stage 2: Quality selection
+        else if (session.stage === "selectQuality") {
+            const qIndex = parseInt(text) - 1;
+            const movie = session.movie;
+            if (!movie.dl_links?.[qIndex]) return reply("❌ Invalid number");
+
+            const selectedDL = movie.dl_links[qIndex];
+            if (!selectedDL.link.includes("mega.nz")) return reply("❌ Selected link is not Mega");
+
+            session.stage = null; // End session
+            sessions.set(from, null);
+
+            // Send info + thumbnail
+            const thumb = movie.image ? await makeThumbnail(movie.image) : null;
+            let infoText = `🎬 *${movie.title}*\n`;
+            infoText += movie.imdb ? `⭐ IMDB: ${movie.imdb}\n` : "";
+            infoText += movie.tmdb ? `⭐ TMDB: ${movie.tmdb}\n` : "";
+            infoText += `📅 Date: ${movie.date || "N/A"}\n`;
+            infoText += `⏱️ Runtime: ${movie.runtime || "N/A"}\n`;
+            infoText += `🌎 Country: ${movie.country || "N/A"}\n`;
+            infoText += `🎭 Genres: ${movie.category?.join(", ") || "N/A"}\n\n${FOOTER}`;
+
+            await conn.sendMessage(from, { image: { url: movie.image }, caption: infoText }, { quoted: m });
+
+            // Send Mega link + info
+            let dlText = `⬇️ Downloading from Mega...\n\nQuality: ${selectedDL.quality}\nSize: ${selectedDL.size}\nLink: ${selectedDL.link}`;
+            await conn.sendMessage(from, { text: dlText }, { quoted: m });
+        }
+
+    } catch (e) {
+        console.error("Pirate REPLY ERROR:", e);
+        reply("⚠️ Error: " + e.message);
     }
 });
