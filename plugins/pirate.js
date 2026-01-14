@@ -1,83 +1,115 @@
+const { default: makeWASocket, useSingleFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const { cmd } = require("../command");
-const axios = require("axios");
-const { makeThumbnail } = require("../lib/functions"); // assume thumbnail helper exists
+const P = require('pino');
+const axios = require('axios');
 
-cmd({
-    pattern: "movie",
-    desc: "Search and get movie download links",
-    category: "movie",
-    use: ".movie <movie name>",
-    react: "🎬",
-    filename: __filename
-}, async (conn, mek, msg, { from, args, reply }) => {
-    try {
-        if(!args[0]) return reply("Please provide a movie name!");
-        const query = args.join(" ");
+const { state, saveState } = useSingleFileAuthState('./auth_info.json');
 
-        // 1️⃣ Search movie
-        const searchRes = await axios.get(`https://ty-opal-eta.vercel.app/movie/pirate/search?text=${encodeURIComponent(query)}`);
-        const movies = searchRes.data.result.data;
-        if(!movies || movies.length === 0) return reply("No results found.");
+async function startBot() {
+    const { version } = await fetchLatestBaileysVersion();
+    const sock = makeWASocket({
+        logger: P({ level: 'silent' }),
+        printQRInTerminal: true,
+        auth: state,
+        version
+    });
 
-        // 2️⃣ Build search list
-        let listText = "🎬 *Search Results*\n\n";
-        movies.forEach((m,i)=>{
-            listText += `*${i+1}.* ${m.title} | ${m.year}\nIMDB: ${m.imdb || "N/A"}\n\n`;
-        });
-        listText += "Reply with the number of the movie.";
-        await reply(listText);
+    sock.ev.on('creds.update', saveState);
 
-        // 3️⃣ Wait for user's number reply
-        conn.ev.on("messages.upsert", async ({ messages }) => {
-            const m = messages[0];
-            if(!m.message || !m.message.conversation) return;
-            const num = parseInt(m.message.conversation);
-            if(isNaN(num) || num < 1 || num > movies.length) return;
-            
-            const selected = movies[num-1];
+    const searchMemory = {}; // store search results
 
-            // 4️⃣ Fetch movie details
-            const detailRes = await axios.get(`https://ty-opal-eta.vercel.app/movie/pirate/movie?url=${encodeURIComponent(selected.link)}`);
-            const details = detailRes.data.result.data;
+    sock.ev.on('messages.upsert', async (m) => {
+        const msg = m.messages[0];
+        if (!msg.message || msg.key.fromMe) return;
 
-            // 5️⃣ Poster thumbnail
-            const poster = details.image || "";
-            const thumb = await makeThumbnail(poster);
+        const from = msg.key.remoteJid;
+        const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
+        if (!text) return;
 
-            // 6️⃣ Filter links: Mega / GDrive / Sub
-            const links = { Mega: {}, GDrive: {}, Sub: {} };
-            details.dl_links.forEach(dl => {
-                const url = dl.link;
-                const lower = dl.quality.toLowerCase();
-                const qualityMatch = dl.quality.match(/\d{3,4}p/i);
-                const quality = qualityMatch ? qualityMatch[0].toUpperCase() : dl.quality;
+        // ===== Command system =====
+        if (text.startsWith('.movie ')) {
+            const query = text.replace('.movie ', '').trim();
+            console.log(`[CMD SEARCH] ${from} searched for: "${query}"`);
+            await sock.sendMessage(from, { text: `🔍 Searching for "${query}"...` });
 
-                if(lower.includes("mega")) links.Mega[quality] = url;
-                else if(lower.includes("gdrive")) links.GDrive[quality] = url;
-                else if(lower.includes("sub") || lower.includes("srt")) links.Sub[quality] = url;
-            });
+            try {
+                const searchApi = `https://ty-opal-eta.vercel.app/movie/pirate/search?text=${encodeURIComponent(query)}`;
+                const response = await axios.get(searchApi);
+                const results = response.data.result.data;
 
-            // 7️⃣ Build download message
-            let dlText = `🎬 *${details.title}* Sinhala Subtitles\n\n`;
-            dlText += `⭐ TMDB: ${details.tmdb || "N/A"}\n📅 Release: ${details.date || "N/A"}\n⏱ Duration: ${details.runtime || "N/A"}\n🎭 Genre: ${details.category.join(", ")}\n🎬 Director: ${details.director || "N/A"}\n\n`;
-            dlText += `⬇️ *Download Links Organized*\n\n`;
+                if (!results || results.length === 0) {
+                    await sock.sendMessage(from, { text: '❌ No movies found.' });
+                    return;
+                }
 
-            for(const q of ["480P","720P","1080P"]){
-                dlText += `*${q}*\n`;
-                dlText += `• Mega: ${links.Mega[q] || "❌ Not available"}\n`;
-                dlText += `• GDrive: ${links.GDrive[q] || "❌ Not available"}\n`;
-                dlText += `• Sub: ${links.Sub[q] || "❌ Not available"}\n\n`;
+                let messageText = '🎬 *Search Results*\n\n';
+                results.slice(0, 10).forEach((movie, i) => {
+                    messageText += `*${i + 1}.* ${movie.title} | ${movie.year}\nIMDB: ${movie.imdb}\n`;
+                });
+                messageText += '\nReply with the number of the movie.';
+                await sock.sendMessage(from, { text: messageText });
+
+                searchMemory[from] = results; // store results for reply
+            } catch (err) {
+                console.error('[CMD SEARCH ERROR]', err);
+                await sock.sendMessage(from, { text: '❌ Error searching movies.' });
+            }
+        }
+
+        // ===== Handle number reply =====
+        else if (/^\d+$/.test(text)) {
+            const index = parseInt(text) - 1;
+            const results = searchMemory[from];
+            if (!results || !results[index]) return;
+
+            // React to user selection
+            try {
+                await sock.sendMessage(from, {
+                    react: { text: '🔄', key: msg.key }
+                });
+            } catch (e) {
+                console.error('[REACT ERROR]', e);
             }
 
-            // 8️⃣ Send message with thumbnail
-            await conn.sendMessage(from, {
-                image: { url: poster },
-                caption: dlText
-            });
-        });
+            const movie = results[index];
+            console.log(`[CMD SELECT] ${from} selected: "${movie.title}"`);
+            await sock.sendMessage(from, { text: `⬇️ Fetching links for *${movie.title}*...` });
 
-    } catch(e) {
-        console.log(e);
-        reply("Error fetching movie info.");
-    }
-});
+            try {
+                const movieApi = `https://ty-opal-eta.vercel.app/movie/pirate/movie?url=${encodeURIComponent(movie.link)}`;
+                const res = await axios.get(movieApi);
+                const data = res.data.result.data;
+
+                const links = { "480P": {}, "720P": {}, "1080P": {} };
+                data.dl_links.forEach(l => {
+                    const q = l.quality.toLowerCase();
+                    if (q.includes('480')) links["480P"][l.link.includes('mega') ? 'mega' : 'gdrive'] = l.link;
+                    else if (q.includes('720')) links["720P"][l.link.includes('mega') ? 'mega' : 'gdrive'] = l.link;
+                    else if (q.includes('1080')) links["1080P"][l.link.includes('mega') ? 'mega' : 'gdrive'] = l.link;
+                    else if (q.includes('sub') || q.includes('සිංහල')) {
+                        links["480P"].sub = l.link;
+                        links["720P"].sub = l.link;
+                        links["1080P"].sub = l.link;
+                    }
+                });
+
+                let msgText = `🎬 *${data.title}*\n\n⭐ TMDB: ${data.tmdb || "N/A"}\n📅 Release: ${data.date}\n⏱ Duration: ${data.runtime}\n🎭 Genre: ${data.category.join(', ')}\n🎬 Director: ${data.director}\n\n⬇️ *Download Links*\n`;
+                ["480P","720P","1080P"].forEach(q => {
+                    msgText += `\n*${q}*\n• Mega: ${links[q].mega || "N/A"}\n• GDrive: ${links[q].gdrive || "N/A"}\n• Subtitles: ${links[q].sub || "N/A"}\n`;
+                });
+                msgText += '\n✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌☢️☘';
+
+                console.log(`[CMD LINKS] Sent download links for "${data.title}"`);
+                await sock.sendMessage(from, {
+                    image: { url: data.image },
+                    caption: msgText
+                });
+            } catch (err) {
+                console.error('[CMD MOVIE ERROR]', err);
+                await sock.sendMessage(from, { text: '❌ Error fetching movie links.' });
+            }
+        }
+    });
+}
+
+startBot();
