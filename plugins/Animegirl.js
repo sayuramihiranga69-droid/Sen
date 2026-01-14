@@ -1,229 +1,346 @@
 const config = require('../config');
 const { cmd } = require('../command');
-const axios = require('axios');
-const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
+const fetch = require('node-fetch');
+const fs = require('fs').promises; // Use promises-based fs for async/await
+const fsStream = require('fs'); // For streaming
+const path = require('path');
 
-const apiKey = 'prabath_sk_5f6b6518b2aed4142f92d01f6c5f1026b88df3d3';
+// Global message collector to handle multiple selections
+const messageCollectors = new Map();
 
-let isUploadingg = false;
+// Helper function to format file size
+const formatSize = (bytes) => {
+    if (bytes === 0) return '0B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
+};
 
-//=========================================================================================================================
-// Movie Search
-cmd({
-  pattern: "cine",
-  react: '🔎',
-  category: "movie",
-  alias: ["cinesubz"],
-  desc: "cinesubz.co movie search",
-  use: ".cine 2025",
-  filename: __filename
-},
-async (conn, m, mek, { from, q, prefix, reply }) => {
-  try {
-    if (!q) return await reply('*Please give me a movie name 🎬*');
+// Helper function to sanitize text
+const sanitize = (text) => {
+    return text.replace(/[^a-zA-Z0-9\s\-_]/g, '').trim();
+};
 
-    // Search API call
-    const searchRes = await fetch('https://api.prabath.top/api/v1/cinesubz/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-      body: JSON.stringify({ "query": q })
-    }).then(res => res.json());
+// Helper function to convert pixeldrain link to download format
+const convertPixeldrainLink = (link) => {
+    const match = link.match(/pixeldrain\.com\/(?:u|api\/file)\/([a-zA-Z0-9]+)/);
+    if (!match) return null;
+    const fileId = match[1];
+    return `https://pixeldrain.com/api/file/${fileId}?download`;
+};
 
-    if (!searchRes.data || searchRes.data.length === 0) {
-      await conn.sendMessage(from, { react: { text: '❌', key: mek.key } });
-      return await conn.sendMessage(from, { text: '*No results found ❌*' }, { quoted: mek });
+// Helper function to fetch thumbnail as buffer
+const fetchThumbnail = async (url) => {
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to fetch thumbnail');
+        const buffer = await response.buffer();
+        return buffer;
+    } catch (error) {
+        console.error('[THUMBNAIL FETCH ERROR]:', error);
+        return null; // Return null if thumbnail fetch fails
     }
+};
 
-    const rowss = searchRes.data.map((v) => ({
-      title: v.title.replace(/Sinhala Subtitles|සිංහල උපසිරැසි සමඟ/gi, "").trim(),
-      id: prefix + `cinedl ${v.link}`
-    }));
-
-    const listButtons = {
-      title: "Choose a Movie :)",
-      sections: [{ title: "Available Results", rows: rowss }]
-    };
-
-    const caption = `_*CINESUBZ MOVIE SEARCH RESULTS 🎬*_ \n\n*\`Input :\`* ${q}`;
-
-    if (config.BUTTON === "true") {
-      await conn.sendMessage(from, {
-        image: { url: config.LOGO },
-        caption: caption,
-        footer: config.FOOTER,
-        buttons: [{
-          buttonId: "movie_select",
-          buttonText: { displayText: "🎥 Select Movie" },
-          type: 4,
-          nativeFlowInfo: { name: "single_select", paramsJson: JSON.stringify(listButtons) }
-        }],
-        viewOnce: true
-      }, { quoted: mek });
-    } else {
-      let listMsg = caption + "\n\n";
-      searchRes.data.forEach((v, i) => {
-        listMsg += `*${i + 1}.* ${v.title}\n`;
-      });
-      await reply(listMsg);
-    }
-
-  } catch (e) {
-    console.log(e);
-    await conn.sendMessage(from, { text: '🚩 *Error !!*' }, { quoted: mek });
-  }
-});
-
-//=========================================================================================================================
-// Movie Info & Quality Selector
 cmd({
-  pattern: "cinedl",
-  react: '🎥',
-  desc: "movie info & quality selector",
-  filename: __filename
-},
-async (conn, m, mek, { from, q, prefix, reply }) => {
-  try {
-    if (!q || !q.includes('cinesubz')) return await reply('*❗ Invalid Link!*');
+    pattern: "movie",
+    alias: ["moviedl", "film"],
+    react: "🎬",
+    desc: "Search movies/TV shows and send selected file with custom caption and thumbnail or details card to specified JID using Dark Yasiya API",
+    category: "download",
+    use: ".movie <search query> | <JID>",
+    filename: __filename
+}, async (conn, m, mek, { from, q, reply }) => {
+    try {
+        if (!q) return await reply("❌ Please provide a search query and JID (e.g., .movie Deadpool | 120363398809321097@g.us)!");
 
-    const movieRes = await fetch('https://api.prabath.top/api/v1/cinesubz/movie', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-      body: JSON.stringify({ "url": q })
-    }).then(res => res.json());
+        // Parse query and JID
+        const [searchQuery, targetJid] = q.split('|').map(s => s.trim());
+        if (!searchQuery || !targetJid || !targetJid.includes('@g.us')) {
+            return await reply("❌ Invalid format! Use: .movie <query> | <group JID>");
+        }
 
-    if (!movieRes.data) return await reply('🚩 *Could not fetch movie info!*');
+        // Log input for debugging
+        console.log('[MOVIE INPUT]:', { query: searchQuery, targetJid });
 
-    const s = movieRes.data;
-    let msg = `*☘️ 𝗧ɪᴛʟᴇ ➮* *_${s.title}_*\n\n` +
-              `*📅 𝗥ᴇʟᴇꜱᴇᴅ ➮* _${s.date || 'N/A'}_\n` +
-              `*💃 𝗥ᴀᴛɪɴɢ ➮* _${s.imdb || 'N/A'}_\n` +
-              `*⏰ 𝗥ᴜɴᴛɪᴍᴇ ➮* _${s.runtime || 'N/A'}_\n` +
-              `*💁‍♂️ 𝗦ᴜʙᴛɪᴛʟᴇ ʙʏ ➮* _${s.subtitle_author || 'N/A'}_\n` +
-              `*🎭 𝗚ᴇɴᴀʀᴇꜱ ➮* ${s.genres ? s.genres.join(', ') : 'N/A'}\n`;
+        // Fetch search results using Dark Yasiya API
+        const searchUrl = `https://www.dark-yasiya-api.site/movie/sinhalasub/search?text=${encodeURIComponent(searchQuery)}`;
+        const searchResponse = await fetch(searchUrl);
+        if (!searchResponse.ok) throw new Error(`Search API failed with status ${searchResponse.status}`);
+        const searchData = await searchResponse.json();
 
-    const rowss = movieRes.dl_links.map((v) => ({
-      title: `${v.quality} (${v.size})`,
-      id: prefix + `paka ${s.image}±${s.title}±${v.link}±${v.quality}`
-    }));
+        // Log search response
+        console.log('[MOVIE SEARCH RESPONSE]:', searchData);
 
-    const listButtons = {
-      title: "🎬 Choose a download link:",
-      sections: [{ title: "Available Qualities", rows: rowss }]
-    };
+        if (!searchData?.status || !searchData?.result?.data?.length) {
+            return await reply("❌ No movies or TV shows found for your query!");
+        }
 
-    if (config.BUTTON === "true") {
-      await conn.sendMessage(from, {
-        image: { url: s.image },
-        caption: msg,
-        footer: config.FOOTER,
-        buttons: [
-          {
-            buttonId: prefix + 'ctdetails ' + q,
-            buttonText: { displayText: "Details Send" },
-            type: 1
-          },
-          {
-            buttonId: "dl_select",
-            buttonText: { displayText: "🎥 Select Quality" },
-            type: 4,
-            nativeFlowInfo: { name: "single_select", paramsJson: JSON.stringify(listButtons) }
-          }
-        ],
-        viewOnce: true
-      }, { quoted: mek });
-    } else {
-      await reply(msg + "\n\n*Quality links fetched. Please use buttons.*");
+        // Get all search results
+        const items = searchData.result.data;
+
+        // Construct search results message
+        let searchResults = `
+╭「 *MOVIE SEARCH* 」╮
+│
+│ 🔎 *Search Query*: ${searchQuery}
+│ 📍 *Target JID*: ${targetJid}
+│ 📋 *Select a movie/TV show by replying with its number*:
+│
+${items.map((item, index) => `│ ${index + 1}. ${item.title || "Unknown"} [${item.type}, ${item.year}, ${item.imdb}]`).join('\n')}
+│
+╰─────────────╯
+${config.FOOTER || "*© 𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈 𝚀𝚄𝙴𝙴𝙽 𝙶𝙸𝙼𝙸*"}
+`;
+
+        // Send search results message to original chat
+        const searchMsg = await conn.sendMessage(
+            from,
+            { text: searchResults },
+            { quoted: mek }
+        );
+
+        // Add reaction
+        await conn.sendMessage(from, { react: { text: '🔎', key: searchMsg.key } });
+
+        // Create a temporary directory for storing files
+        const tempDir = path.join(__dirname, 'temp_movie_downloads');
+        await fs.mkdir(tempDir, { recursive: true });
+
+        // Message collector for handling multiple selections
+        const collectorKey = `${from}_${searchMsg.key.id}`;
+        messageCollectors.set(collectorKey, { items, searchMsg, targetJid });
+
+        // Listen for user replies
+        conn.ev.on('messages.upsert', async (messageUpdate) => {
+            try {
+                const mekInfo = messageUpdate?.messages[0];
+                if (!mekInfo?.message) return;
+
+                const messageType = mekInfo?.message?.conversation || mekInfo?.message?.extendedTextMessage?.text;
+                const contextInfo = mekInfo?.message?.extendedTextMessage?.contextInfo;
+                const isReplyToSentMsg = contextInfo?.stanzaId === searchMsg.key.id;
+                const isReplyToInfoMsg = messageCollectors.has(`${from}_${contextInfo?.stanzaId}`);
+
+                if (!isReplyToSentMsg && !isReplyToInfoMsg) return;
+
+                let userReply = messageType.trim();
+
+                if (isReplyToSentMsg) {
+                    // Handle movie/TV show selection
+                    const selectedIndex = parseInt(userReply) - 1;
+                    if (isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= items.length) {
+                        return await conn.sendMessage(from, {
+                            text: `❌ Invalid selection! Please reply with a number between 1 and ${items.length}`,
+                            edit: searchMsg.key
+                        });
+                    }
+
+                    const selectedItem = items[selectedIndex];
+
+                    // Fetch movie details using Dark Yasiya API
+                    const movieUrl = `https://www.dark-yasiya-api.site/movie/sinhalasub/movie?url=${encodeURIComponent(selectedItem.link)}`;
+                    const movieResponse = await fetch(movieUrl);
+                    if (!movieResponse.ok) throw new Error(`Movie API failed with status ${movieResponse.status}`);
+                    const movieData = await movieResponse.json();
+
+                    // Log movie response
+                    console.log('[MOVIE DETAILS RESPONSE]:', movieData);
+
+                    if (!movieData?.status || !movieData?.result?.data) {
+                        return await reply("❌ Failed to fetch movie/TV show information!");
+                    }
+                    const movieInfo = movieData.result.data;
+
+                    // Filter and convert pixeldrain links
+                    const pixeldrainLinks = movieInfo.dl_links
+                        .filter(dl => dl.link.includes('pixeldrain.com'))
+                        .map(dl => ({
+                            ...dl,
+                            link: convertPixeldrainLink(dl.link) || dl.link // Convert to download format
+                        }))
+                        .filter(dl => dl.link); // Ensure valid links only
+
+                    // Construct info message with thumbnail
+                    let info = `
+╭「 *MOVIE DOWNLOADER* 」╮
+│
+│ 🎬 *Title*: ${movieInfo.title || selectedItem.title || "Unknown"}
+│ 📂 *Type*: ${selectedItem.type || "Unknown"}
+│ 📅 *Release Date*: ${movieInfo.date || selectedItem.year || "N/A"}
+│ 🌍 *Country*: ${movieInfo.country || "N/A"}
+│ ⏱️ *Runtime*: ${movieInfo.runtime || "N/A"}
+│ ⭐ *IMDb Rating*: ${movieInfo.imdbRate ? `${movieInfo.imdbRate} (${movieInfo.imdbVoteCount} votes)` : selectedItem.imdb || "N/A"}
+│ 🌟 *TMDb;Rating*: ${movieInfo.tmdbRate || "N/A"}
+│ 🎥 *Director*: ${movieInfo.director || "N/A"}
+│ 🗂️ *Categories*: ${movieInfo.category?.join(", ") || "N/A"}
+│ 💁‍♂️ *Subtitle By*: ${movieInfo.subtitle_author || "N/A"}
+│
+│ ⬇️ *Options*:
+${pixeldrainLinks.length ? pixeldrainLinks.map((dl, index) => `│ 1.${index + 1} ${dl.quality} (${dl.size})`).join('\n') : "│ No pixeldrain download links available"}
+│ 2.1 Details Card
+│
+│ 📋 *Select an option by replying with its number*:
+│
+╰────────────────╯
+${config.FOOTER || "*© 𝙿𝙾𝚆𝙴𝚁𝙳 𝙱𝚈 𝚀𝚄𝙴𝙴𝙽 𝙶𝙸𝙼𝙸*"}
+`;
+
+                    // Send thumbnail with info to original chat
+                    const infoMsg = await conn.sendMessage(
+                        from,
+                        {
+                            image: { url: movieInfo.image || selectedItem.image || "https://i.imgur.com/404.png" },
+                            caption: info
+                        },
+                        { quoted: mek }
+                    );
+
+                    // Add reaction
+                    await conn.sendMessage(from, { react: { text: '📥', key: infoMsg.key } });
+
+                    // Store info message for quality/details selection
+                    messageCollectors.set(`${from}_${infoMsg.key.id}`, { movieInfo, pixeldrainLinks, selectedItem, infoMsg, targetJid });
+                } else if (isReplyToInfoMsg) {
+                    // Handle quality or details card selection
+                    const { movieInfo, pixeldrainLinks, selectedItem, infoMsg, targetJid } = messageCollectors.get(`${from}_${contextInfo?.stanzaId}`);
+                    const userSelection = userReply;
+
+                    if (userSelection === "2.1") {
+                        // Send details card to target JID
+                        const detailsCard = `
+*☘️ 𝗧𝗶𝘁𝗹𝗲 ➮* _${movieInfo.title || selectedItem.title || "Unknown"}_
+*📅 𝗥𝗲𝗹𝗲𝗮𝘀𝗲𝗱 𝗗𝗮𝘁𝗲 ➮* _${movieInfo.date || selectedItem.year || "N/A"}_
+*🌎 𝗖𝗼𝘂𝗻𝘁𝗿𝘆 ➮* _${movieInfo.country || "N/A"}_
+*⏰ 𝗥𝘂𝗻𝘁𝗶𝗺𝗲 ➮* _${movieInfo.runtime || "N/A"}_
+*⭐ 𝗜𝗠𝗗𝗯 𝗥𝗮𝘁𝗶𝗻𝗴 ➮* _${movieInfo.imdbRate ? movieInfo.imdbRate + (movieInfo.imdbVoteCount ? ` (${movieInfo.imdbVoteCount} votes)` : "") : selectedItem.imdb || "N/A"}_
+*🌟 𝗧𝗠𝗗𝗯 𝗥𝗮𝘁𝗶𝗻𝗴 ➮* _${movieInfo.tmdbRate || "N/A"}_
+*🎥 𝗗𝗶𝗿𝗲𝗰𝘁𝗼𝗿 ➮* _${movieInfo.director || "N/A"}_
+*🗂️ 𝗖𝗮𝘁𝗲𝗴𝗼𝗿𝗶𝗲𝘀 ➮* _${movieInfo.category?.join(", ") || "N/A"}_
+*💁‍♂️ 𝗦𝘂𝗯𝘁𝗶𝘁𝗹𝗲 𝗕𝘆 ➮* _${movieInfo.subtitle_author || "N/A"}_
+
+*𝙲 𝙸 𝙽 𝙴 𝚅 𝙸 𝙱 𝙴 𝚂  𝙻 𝙺*
+`;
+
+                        await conn.sendMessage(
+                            targetJid,
+                            {
+                                image: { url: movieInfo.image || selectedItem.image || "https://i.imgur.com/404.png" },
+                                caption: detailsCard
+                            }
+                        );
+
+                        // Send confirmation to original chat
+                        await conn.sendMessage(from, {
+                            text: `✅ Details card sent successfully to ${targetJid}!`,
+                            edit: infoMsg.key
+                        });
+
+                        // Add reaction
+                        await conn.sendMessage(from, { react: { text: '📋', key: infoMsg.key } });
+                    } else {
+                        // Handle quality selection
+                        const selectedQualityIndex = parseInt(userSelection.split('.')[1]) - 1;
+                        if (isNaN(selectedQualityIndex) || selectedQualityIndex < 0 || selectedQualityIndex >= pixeldrainLinks.length) {
+                            return await conn.sendMessage(from, {
+                                text: `❌ Invalid quality selection! Please reply with a number like 1.1, 1.2, ..., or 2.1 for details card`,
+                                edit: infoMsg.key
+                            });
+                        }
+
+                        const selectedQuality = pixeldrainLinks[selectedQualityIndex];
+
+                        const processingMsg = await conn.sendMessage(from, { text: "⏳ Processing your request..." }, { quoted: mek });
+
+                        // Check file size (WhatsApp document limit ~100MB)
+                        const headResponse = await fetch(selectedQuality.link, { method: 'HEAD' });
+                        const fileSize = parseInt(headResponse.headers.get('content-length') || '0');
+                        if (fileSize > 2000 * 1024 * 1024) {
+                            await conn.sendMessage(from, {
+                                text: "❌ Video size exceeds WhatsApp's 100MB limit for documents!",
+                                edit: processingMsg.key
+                            });
+                            return await conn.sendMessage(targetJid, {
+                                text: `❌ Video size exceeds WhatsApp's 100MB limit for documents! (${selectedQuality.quality}, ${formatSize(fileSize)})`
+                            });
+                        }
+
+                        // Construct filename
+                        const fileName = `${sanitize(movieInfo.title || selectedItem.title || "movie")} - ${selectedQuality.quality}.mp4`.replace(/[^a-z0-9_.-]/gi, '_');
+                        const filePath = path.join(tempDir, fileName);
+
+                        // Fetch thumbnail
+                        const thumbnailUrl = movieInfo.image || selectedItem.image || "https://i.imgur.com/404.png";
+                        const thumbnail = await fetchThumbnail(thumbnailUrl);
+
+                        // Stream file to disk
+                        const fileRes = await fetch(selectedQuality.link);
+                        if (!fileRes.ok) throw new Error(`Failed to fetch file with status ${fileRes.status}`);
+                        const writer = fsStream.createWriteStream(filePath);
+                        fileRes.body.pipe(writer);
+
+                        // Wait for the stream to finish
+                        await new Promise((resolve, reject) => {
+                            writer.on('finish', resolve);
+                            writer.on('error', reject);
+                        });
+
+                        // Send video as a document from disk to target JID with custom caption and thumbnail
+                        await conn.sendMessage(
+                            targetJid,
+                            {
+                                document: { url: filePath },
+                                mimetype: 'video/mp4',
+                                fileName: fileName,
+                                caption: `*${sanitize(movieInfo.title || selectedItem.title)}* (${selectedQuality.quality})\n\n*𝙲 𝙸 𝙽 𝙴 𝚅 𝙸 𝙱 𝙴 𝚂  𝙻 𝙺*`,
+                                jpegThumbnail: thumbnail
+                            }
+                        );
+
+                        // Update processing message in original chat
+                        await conn.sendMessage(from, {
+                            text: `✅ File sent successfully to ${targetJid}! (${selectedQuality.quality}, ${formatSize(fileSize)})`,
+                            edit: processingMsg.key
+                        });
+
+                        // Add reaction
+                        await conn.sendMessage(from, { react: { text: '✅', key: processingMsg.key } });
+
+                        // Clean up: Delete the file from disk after sending
+                        await fs.unlink(filePath).catch((err) => console.error('Cleanup Error:', err));
+                    }
+
+                    // Keep collector active for further selections
+                }
+            } catch (error) {
+                console.error('[MOVIE REPLY ERROR]:', error);
+                await conn.sendMessage(from, {
+                    text: `❌ Error: ${error.message}`,
+                    edit: isReplyToSentMsg ? searchMsg.key : messageCollectors.get(`${from}_${contextInfo?.stanzaId}`)?.infoMsg.key
+                });
+
+                // Cleanup in case of error
+                const fileName = `${sanitize(movieInfo?.title || selectedItem?.title || "movie")} - ${selectedQuality?.quality}.mp4`.replace(/[^a-z0-9_.-]/gi, '_');
+                if (fileName) {
+                    await fs.unlink(path.join(tempDir, fileName)).catch(() => {});
+                }
+            }
+        });
+
+        // Clean up collectors after 5 minutes to prevent memory leaks
+        setTimeout(() => {
+            messageCollectors.delete(collectorKey);
+            for (let key of messageCollectors.keys()) {
+                if (key.startsWith(`${from}_`)) {
+                    messageCollectors.delete(key);
+                }
+            }
+        }, 5 * 60 * 1000);
+
+    } catch (error) {
+        console.error('[MOVIE COMMAND ERROR]:', error);
+        await conn.sendMessage(from, { react: { text: '❌', key: m.key } });
+        await reply(`❌ Error: ${error.message}`);
     }
-  } catch (e) {
-    console.log(e);
-    await reply('🚩 *Error fetching movie details !!*');
-  }
-});
-
-//=========================================================================================================================
-// Download Movie
-cmd({
-  pattern: "paka",
-  react: "⬇️",
-  dontAddCommandList: true,
-  filename: __filename
-}, async (conn, mek, m, { from, q, reply }) => {
-  if (!q) return;
-  if (isUploadingg) return await reply('*A movie is already being uploaded. Please wait...* ⏳');
-
-  try {
-    const [img, title, dlLink, quality] = q.split("±");
-    isUploadingg = true;
-
-    await conn.sendMessage(from, { react: { text: '⏳', key: mek.key } });
-
-    const dlRes = await fetch('https://api.prabath.top/api/v1/cinesubz/download', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-      body: JSON.stringify({ "url": dlLink })
-    }).then(res => res.json());
-
-    const directLink = dlRes.data.direct || dlRes.data.gdrive2 || dlRes.data.pixeldrain;
-
-    if (!directLink) {
-      isUploadingg = false;
-      return await reply("*🚩 Link generation failed!*");
-    }
-
-    const up_mg = await conn.sendMessage(from, { text: '*Uploading your movie..⬆️*' });
-
-    await conn.sendMessage(config.JID || from, {
-      document: { url: directLink },
-      caption: `*🎬 Name :* ${title}\n*🌟 Quality :* ${quality}\n\n${config.FOOTER}`,
-      mimetype: "video/mp4",
-      fileName: `${title} (${quality}).mp4`,
-      jpegThumbnail: await (await fetch(img)).buffer()
-    });
-
-    await conn.sendMessage(from, { delete: up_mg.key });
-    await conn.sendMessage(from, { react: { text: '✔️', key: mek.key } });
-
-  } catch (error) {
-    console.error(error);
-    await reply("🚩 *Upload Failed!*");
-  } finally {
-    isUploadingg = false;
-  }
-});
-
-//=========================================================================================================================
-// Movie Details Card
-cmd({
-  pattern: "ctdetails",
-  react: '🎥',
-  desc: "details card",
-  filename: __filename
-},
-async (conn, m, mek, { from, q, reply }) => {
-  try {
-    if (!q) return await reply('*Please provide a link!*');
-
-    const movieRes = await fetch('https://api.prabath.top/api/v1/cinesubz/movie', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-      body: JSON.stringify({ "url": q })
-    }).then(res => res.json());
-
-    const s = movieRes.data;
-    const details = (await axios.get('https://raw.githubusercontent.com/RAVANA-PRODUCT/database/refs/heads/main/main_var.json')).data;
-
-    let msg = `*☘️ 𝗧ɪᴛʟᴇ ➮* *_${s.title}_*\n\n` +
-              `*📅 𝗥ᴇʟᴇꜱᴇᴅ ➮* _${s.date || 'N/A'}_\n` +
-              `*💃 𝗥ᴀᴛɪɴɢ ➮* _${s.imdb || 'N/A'}_\n` +
-              `*⏰ 𝗥ᴜɴᴛɪᴍᴇ ➮* _${s.runtime || 'N/A'}_\n` +
-              `*🎭 𝗚ᴇɴᴀʀᴇꜱ ➮* _${s.genres.join(', ')}_\n\n` +
-              `> 🌟 Follow us: *${details.chlink}*`;
-
-    await conn.sendMessage(config.JID || from, { image: { url: s.image }, caption: msg });
-    await conn.sendMessage(from, { react: { text: '✔️', key: mek.key } });
-
-  } catch (error) {
-    console.error(error);
-    await reply('🚩 *Error fetching details!*');
-  }
 });
