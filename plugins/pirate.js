@@ -146,6 +146,7 @@ cmd({
             document: fs.readFileSync(tempPath),
             fileName: dlFile.name,
             mimetype: "video/x-matroska",
+            jpegThumbnail: thumb || undefined,
             caption: `📥 *Downloaded: ${dlFile.name}*\n📦 Size: ${(dlFile.size / 1024 / 1024).toFixed(2)} MB\n\n${FOOTER}`
         }, { quoted: m });
 
