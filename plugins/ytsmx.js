@@ -1,156 +1,128 @@
 const { cmd } = require('../command');
 const axios = require('axios');
 
-/* ================= GLOBAL CACHE ================= */
-global.cineCache = {};
+// ================= GLOBAL =================
+global.lastCineSearch = global.lastCineSearch || [];
 
-/* ================= 1️⃣ CINESEARCH ================= */
+// ================= CINESEARCH =================
 cmd({
     pattern: "cinesearch",
-    alias: ["csearch"],
+    alias: ["moviesearch", "csearch"],
     react: "🔍",
     category: "downloader",
+    desc: "Search movies/TV on CineSubz",
     filename: __filename
-}, async (conn, mek, m, { from, q, reply }) => {
+}, async (conn, m, mek, { from, q, prefix, reply }) => {
     try {
-        if (!q) return reply("❗ .cinesearch <movie name>");
+        if (!q) return reply("❗ Please provide a search query\nExample: .cinesearch Avatar");
 
-        const { data } = await axios.get(
-            `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-search?q=${encodeURIComponent(q)}&apikey=deb4e2d4982c6bc2`
-        );
+        reply("🔍 Searching CineSubz...");
 
-        if (!data.status || !data.data || data.data.length === 0) {
-            return reply("❌ No results found");
-        }
+        const url = `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-search?q=${encodeURIComponent(q)}&apikey=deb4e2d4982c6bc2`;
+        const { data } = await axios.get(url);
 
-        // 🔐 Save results per chat
-        global.cineCache[from] = data.data.slice(0, 10);
+        if (!data.status || !data.data || data.data.length === 0)
+            return reply("❌ No results found.");
 
-        let msg = `🎬 *CineSubz Search Results*\n`;
-        msg += `🔎 Query: *${q}*\n\n`;
+        // Save last search globally
+        global.lastCineSearch = data.data.slice(0, 10);
 
-        global.cineCache[from].forEach((v, i) => {
-            msg += `*${i + 1}. ${v.title}*\n`;
-            msg += `📁 ${v.type || 'N/A'} | 📺 ${v.quality || 'N/A'} | ⭐ ${v.rating || 'N/A'}\n\n`;
-        });
+        // Prepare list message
+        const rows = global.lastCineSearch.map((item, i) => ({
+            title: `${i+1}. ${item.title}`,
+            rowId: prefix + 'cinenum ' + (i+1)
+        }));
 
-        msg += `📌 *Reply with a number (1–${global.cineCache[from].length})*`;
+        const listMessage = {
+            text: `🎬 CineSubz Search Results for: ${q}\n\nReply with a number to get details.`,
+            footer: 'CineSubz Downloader',
+            buttonText: 'Select Number',
+            sections: [{ title: '_Results_', rows }]
+        };
 
-        await conn.sendMessage(from, { text: msg }, { quoted: mek });
+        await conn.replyList(from, listMessage, { quoted: mek });
 
     } catch (e) {
-        console.error("cinesearch error:", e);
-        reply("❌ Search failed");
+        console.error("CineSearch Error:", e);
+        reply("❌ Error: " + e.message);
     }
 });
 
-/* ================= 2️⃣ NUMBER REPLY HANDLER ================= */
+// ================= CINESEARCH NUMBER REPLY =================
 cmd({
-    on: "text",
+    pattern: "cinenum",
     dontAddCommandList: true,
     filename: __filename
-}, async (conn, mek, m, { body }) => {
-
-    const chatId = mek.chat;
-    const list = global.cineCache[chatId];
-
-    // ❌ No active search
-    if (!list) return;
-
-    const num = parseInt(body.trim());
-    if (isNaN(num) || num < 1 || num > list.length) return;
-
-    // ✅ Correct selected movie
-    const selected = list[num - 1];
-
-    // 🧹 Clear cache after selection
-    delete global.cineCache[chatId];
-
+}, async (conn, m, mek, { from, q, reply }) => {
     try {
-        /* ================= DETAILS ================= */
-        const infoRes = await axios.get(
-            `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-info?url=${encodeURIComponent(selected.link)}&apikey=deb4e2d4982c6bc2`
-        );
+        if (!global.lastCineSearch || !global.lastCineSearch.length)
+            return reply("*No previous search found!*");
 
-        if (!infoRes.data.status) {
-            return conn.sendMessage(chatId, { text: "❌ Failed to load details" }, { quoted: mek });
-        }
+        const num = parseInt(q);
+        if (isNaN(num) || num < 1 || num > global.lastCineSearch.length)
+            return reply("*Invalid number!*");
 
-        const info = infoRes.data.data;
+        const movie = global.lastCineSearch[num - 1];
 
-        let msg = `🎬 *${info.title}*\n\n`;
-        msg += `📅 Year: ${info.year || 'N/A'}\n`;
-        msg += `📺 Quality: ${info.quality || 'N/A'}\n`;
-        msg += `⭐ Rating: ${info.rating || 'N/A'}\n`;
-        msg += `⏱ Duration: ${info.duration || 'N/A'}\n\n`;
+        // Fetch movie details
+        const apiUrl = `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-info?url=${encodeURIComponent(movie.link)}&apikey=deb4e2d4982c6bc2`;
+        const { data } = await axios.get(apiUrl);
 
-        /* ================= DOWNLOAD LINKS ================= */
-        const dlRes = await axios.get(
-            `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-download?url=${encodeURIComponent(selected.link)}&apikey=deb4e2d4982c6bc2`
-        );
+        if (!data.status || !data.data) return reply("❌ Failed to fetch movie details.");
 
-        if (dlRes.data.status && dlRes.data.data && dlRes.data.data.download?.length) {
-            msg += `📥 *Download Links:*\n\n`;
-            dlRes.data.data.download.forEach((v, i) => {
-                msg += `*${i + 1}. ${v.name.toUpperCase()}*\n🔗 ${v.url}\n\n`;
+        const info = data.data;
+
+        let message = `🎬 *${info.title}*\n\n`;
+        if (info.year) message += `📅 Year: ${info.year}\n`;
+        if (info.quality) message += `📺 Quality: ${info.quality}\n`;
+        if (info.rating) message += `⭐ Rating: ${info.rating}\n`;
+        if (info.duration) message += `⏱ Duration: ${info.duration}\n`;
+        if (info.country) message += `🌍 Country: ${info.country}\n`;
+        if (info.directors) message += `🎬 Directors: ${info.directors}\n\n`;
+
+        if (info.downloads && info.downloads.length > 0) {
+            message += `📥 *Available Download Links:*\n`;
+            info.downloads.forEach((dl, idx) => {
+                message += `*${idx + 1}. ${dl.name.toUpperCase()}* → ${dl.url}\n`;
             });
         } else {
-            msg += `❌ No download links found`;
+            message += `❌ No download links available.`;
         }
 
         if (info.image) {
-            await conn.sendMessage(chatId, {
-                image: { url: info.image },
-                caption: msg
-            }, { quoted: mek });
+            await conn.sendMessage(from, { image: { url: info.image }, caption: message }, { quoted: mek });
         } else {
-            await conn.sendMessage(chatId, { text: msg }, { quoted: mek });
+            await conn.sendMessage(from, { text: message }, { quoted: mek });
         }
 
-    } catch (err) {
-        console.error("number reply error:", err);
-        conn.sendMessage(chatId, { text: "❌ Error loading movie" }, { quoted: mek });
+    } catch (e) {
+        console.error("CineNumber Error:", e);
+        reply("❌ Error: " + e.message);
     }
 });
 
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 4️⃣ CINEDOWNLOAD (PIXELDRAIN / TELEGRAM LINKS)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ================= CINE DOWNLOAD COMMAND (OPTIONAL) =================
 cmd({
     pattern: "cinedownload",
     alias: ["cinedl", "cdl"],
-    desc: "Fetch Pixeldrain / Telegram links",
+    desc: "Download movie from Pixeldrain/Telegram links",
     category: "downloader",
     react: "📥",
     filename: __filename
-}, async (conn, mek, m, { from, q, reply }) => {
+}, async (conn, m, mek, { from, q, reply }) => {
     try {
-        if (!q) return reply("❗ Example:\n.cinedownload <download link>");
+        if (!q) return reply("❗ Please provide a download link\nExample: .cinedownload <link>");
 
-        const apiUrl = `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-download?url=${encodeURIComponent(q)}&apikey=deb4e2d4982c6bc2`;
-        const { data } = await axios.get(apiUrl);
+        await conn.sendMessage(from, {
+            document: { url: q },
+            mimetype: "video/mp4",
+            fileName: `CineSubz_${Date.now()}.mp4`,
+            caption: "✅ Downloaded via CineSubz API"
+        }, { quoted: mek });
 
-        if (!data.status || !data.data || !Array.isArray(data.data.download)) {
-            return reply("❌ Download links not found.");
-        }
-
-        let msg = `📥 *Download Links*\n\n`;
-        msg += `🎬 ${data.data.title}\n`;
-        msg += `📦 Size: ${data.data.size || 'N/A'}\n\n`;
-
-        data.data.download.forEach((d, i) => {
-            msg += `*${i + 1}. ${d.name.toUpperCase()}*\n`;
-            msg += `${d.url}\n\n`;
-        });
-
-        msg += `━━━━━━━━━━━━━━━━━━━━━━\n`;
-        msg += `📌 Open link in browser or Telegram`;
-
-        await conn.sendMessage(from, { text: msg }, { quoted: mek });
-
+        reply("✅ Download command executed. File should start sending shortly.");
     } catch (e) {
-        console.error("cinedownload error:", e);
-        reply("❌ Failed to fetch download links.");
+        console.error("Download Error:", e);
+        reply("❌ Download failed: " + e.message);
     }
 });
