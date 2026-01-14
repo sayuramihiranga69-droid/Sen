@@ -1,10 +1,11 @@
 const { cmd } = require("../command");
 const axios = require("axios");
 const fg = require("api-dylux");
+const sharp = require("sharp");
 
-const SRIHUB_APIKEY = "dew_B59NylJtdTt6KmCaDpLt5VXWo1aohDRyRblCDlc7";
+const API_KEY = "dew_B59NylJtdTt6KmCaDpLt5VXWo1aohDRyRblCDlc7";
 const FOOTER = "✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌𝐄☢️☘";
-const POSTER_FALLBACK = "https://i.imgur.com/8Qf4H0P.jpg";
+const FALLBACK_POSTER = "https://i.imgur.com/8Qf4H0P.jpg";
 
 /* ───── React helper ───── */
 async function react(conn, jid, key, emoji) {
@@ -13,7 +14,7 @@ async function react(conn, jid, key, emoji) {
   } catch {}
 }
 
-/* ───── Wait for reply helper ───── */
+/* ───── Wait for reply ───── */
 function waitForReply(conn, from, replyToId, timeout = 120000) {
   return new Promise((resolve, reject) => {
     const handler = (update) => {
@@ -29,6 +30,7 @@ function waitForReply(conn, from, replyToId, timeout = 120000) {
         resolve({ msg, text });
       }
     };
+
     conn.ev.on("messages.upsert", handler);
     setTimeout(() => {
       conn.ev.off("messages.upsert", handler);
@@ -37,38 +39,47 @@ function waitForReply(conn, from, replyToId, timeout = 120000) {
   });
 }
 
+/* ───── Create jpegThumbnail ───── */
+async function makeThumbnail(url) {
+  try {
+    const img = await axios.get(url, { responseType: "arraybuffer" });
+    return await sharp(img.data)
+      .resize(320, 320, { fit: "inside" })
+      .jpeg({ quality: 60 })
+      .toBuffer();
+  } catch {
+    return null;
+  }
+}
+
 /* ───── Command ───── */
 cmd({
   pattern: "moviesub",
-  desc: "Search Sinhala Sub Movies & Auto Download",
+  desc: "Search Sinhala Sub Movies / TV Series and auto download",
   category: "downloader",
   react: "🎬",
   filename: __filename,
 }, async (conn, mek, m, { from, q, reply }) => {
   try {
-    if (!q) return reply("❗ Example: `.moviesub Spider Man`");
+    if (!q) return reply("❗ Example: `.moviesub Stranger Things`");
 
     await react(conn, from, m.key, "🔍");
 
     /* 1️⃣ Search */
     const search = await axios.get(
-      `https://api.srihub.store/movie/moviesub?q=${encodeURIComponent(q)}&apikey=${SRIHUB_APIKEY}`
+      `https://api.srihub.store/movie/moviesub?q=${encodeURIComponent(q)}&apikey=${API_KEY}`
     );
 
     const results = search.data?.result;
     if (!results?.length) return reply("❌ No results found");
 
-    let listText = "🎬 *Search Results*\n\n";
+    let list = "🎬 *Search Results*\n\n";
     results.slice(0, 10).forEach((v, i) => {
-      listText += `*${i + 1}.* ${v.title}\n`;
+      list += `*${i + 1}.* ${v.title}\n`;
     });
-    listText += `\nReply number\n\n${FOOTER}`;
+    list += `\nReply with number\n\n${FOOTER}`;
 
-    const listMsg = await conn.sendMessage(
-      from,
-      { text: listText },
-      { quoted: m }
-    );
+    const listMsg = await conn.sendMessage(from, { text: list }, { quoted: m });
     await react(conn, from, listMsg.key, "📃");
 
     /* 2️⃣ Select */
@@ -77,6 +88,7 @@ cmd({
       from,
       listMsg.key.id
     );
+
     const index = parseInt(text) - 1;
     if (isNaN(index) || !results[index])
       return reply("❌ Invalid number");
@@ -84,27 +96,25 @@ cmd({
     const movie = results[index];
     await react(conn, from, selMsg.key, "🎬");
 
-    /* 3️⃣ Download info */
+    /* 3️⃣ Get download info */
     const dlRes = await axios.get(
       `https://api.srihub.store/movie/moviesubdl?url=${encodeURIComponent(
         movie.url
-      )}&apikey=${SRIHUB_APIKEY}`
+      )}&apikey=${API_KEY}`
     );
 
     const dl = dlRes.data?.result?.downloads;
     if (!dl?.gdrive) return reply("❌ GDrive not available");
 
-    /* 4️⃣ Poster + info */
+    /* 4️⃣ Poster message */
     const poster =
-      movie.thumbnail && movie.thumbnail.startsWith("http")
-        ? movie.thumbnail
-        : POSTER_FALLBACK;
+      movie.thumbnail?.startsWith("http") ? movie.thumbnail : FALLBACK_POSTER;
 
-    const infoMsg = await conn.sendMessage(
+    await conn.sendMessage(
       from,
       {
         image: { url: poster },
-        caption: `🎬 *${movie.title}*\n\n⬇️ Downloading from Google Drive...\n\n${FOOTER}`,
+        caption: `🎬 *${movie.title}*\n\n🌐 GDrive Available\n\n${FOOTER}`,
       },
       { quoted: selMsg }
     );
@@ -113,35 +123,39 @@ cmd({
     const uploading = await conn.sendMessage(
       from,
       { text: "⬆️ Uploading movie, please wait..." },
-      { quoted: infoMsg }
+      { quoted: selMsg }
     );
     await react(conn, from, uploading.key, "⏳");
 
-    /* 6️⃣ GDrive download */
-    const fixedLink = dl.gdrive
+    /* 6️⃣ Fix GDrive link */
+    const gdrive = dl.gdrive
       .replace(
         "https://drive.usercontent.google.com/download?id=",
         "https://drive.google.com/file/d/"
       )
       .replace("&export=download", "/view");
 
-    const file = await fg.GDriveDl(fixedLink);
+    const file = await fg.GDriveDl(gdrive);
 
-    /* 7️⃣ Delete uploading msg */
+    /* 7️⃣ Create thumbnail */
+    const thumb = await makeThumbnail(poster);
+
+    /* 8️⃣ Delete uploading */
     await conn.sendMessage(from, { delete: uploading.key });
 
-    /* 8️⃣ Send document */
+    /* 9️⃣ Send document with thumbnail */
     const sent = await conn.sendMessage(
       from,
       {
         document: { url: file.downloadUrl },
         fileName: file.fileName,
         mimetype: file.mimetype,
+        jpegThumbnail: thumb || undefined,
         caption:
           file.fileName.replace("[Cinesubz.co]", "") +
           `\n\n${FOOTER}`,
       },
-      { quoted: infoMsg }
+      { quoted: selMsg }
     );
 
     await react(conn, from, sent.key, "✅");
