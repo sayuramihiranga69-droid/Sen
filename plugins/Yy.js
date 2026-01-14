@@ -3,7 +3,7 @@ const axios = require('axios');
 
 const cinesubz_footer = "✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌𝐄☢️☘";
 
-// Helper function to send Pixeldrain file as WhatsApp document
+// Send Pixeldrain file as WhatsApp document with thumbnail & footer
 async function sendPixeldrainFile(conn, from, url, quotedMsg, fileName) {
     try {
         const thumbUrl = "https://files.catbox.moe/d0v6fe.png";
@@ -44,7 +44,6 @@ cmd({
         const { data } = await axios.get(searchUrl);
         if (!data.status || !data.data || data.data.length === 0) return reply("❌ No results found.");
 
-        // Build search list
         let listMsgText = `🎬 *CineSubz Search Results*\n\n🔎 Query: *${q}*\n📊 Found: ${data.data.length} results\n\n`;
         data.data.slice(0, 10).forEach((item, idx) => {
             listMsgText += `*${idx + 1}. ${item.title}*\n`;
@@ -60,22 +59,26 @@ cmd({
         );
         const listMsgId = listMsg.key.id;
 
-        // One-time listener for movie selection
-        conn.ev.once("messages.upsert", async (update) => {
+        // Listener for movie selection (v7 compatible)
+        const movieListener = async (update) => {
             const msg = update?.messages?.[0];
             if (!msg?.message) return;
 
             const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
+            const isReplyToList = msg?.message?.extendedTextMessage?.contextInfo?.stanzaId === listMsgId;
+            if (!isReplyToList) return;
+
+            conn.ev.removeListener("messages.upsert", movieListener);
+
             const index = parseInt(text.trim()) - 1;
             if (isNaN(index) || index < 0 || index >= data.data.length) {
                 await conn.sendMessage(from, { react: { text: "❌", key: msg.key } });
                 return reply("❌ Invalid number. Reply with a valid number.", msg);
             }
 
-            const chosen = data.data[index];
             await conn.sendMessage(from, { react: { text: "🎬", key: msg.key } });
 
-            // Fetch movie details
+            const chosen = data.data[index];
             const detailsUrl = `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-info?url=${encodeURIComponent(chosen.link)}&apikey=deb4e2d4982c6bc2`;
             const detailsRes = await axios.get(detailsUrl);
             const info = detailsRes.data?.data;
@@ -106,12 +109,17 @@ cmd({
             );
             const detailsMsgId = detailsMsg.key.id;
 
-            // One-time listener for download selection
-            conn.ev.once("messages.upsert", async (dlUpdate) => {
+            // Listener for download selection
+            const downloadListener = async (dlUpdate) => {
                 const dlMsg = dlUpdate?.messages?.[0];
                 if (!dlMsg?.message) return;
 
                 const dlText = dlMsg.message?.conversation || dlMsg.message?.extendedTextMessage?.text;
+                const isReplyToDetails = dlMsg?.message?.extendedTextMessage?.contextInfo?.stanzaId === detailsMsgId;
+                if (!isReplyToDetails) return;
+
+                conn.ev.removeListener("messages.upsert", downloadListener);
+
                 const dlIndex = parseInt(dlText.trim()) - 1;
                 if (isNaN(dlIndex) || dlIndex < 0 || dlIndex >= info.downloads.length) {
                     await conn.sendMessage(from, { react: { text: "❌", key: dlMsg.key } });
@@ -129,14 +137,17 @@ cmd({
                 if (!dlData || !dlData.download || dlData.download.length === 0)
                     return reply("❌ Failed to fetch Pixeldrain links.", dlMsg);
 
-                // Send first PIX file
                 const file = dlData.download.find(f => f.name.toUpperCase().includes("PIX"));
                 if (file) {
                     const fileName = `${info.title} (${info.year}) ${file.quality} [CineSubz].mp4`.replace(/[\/\\:*?"<>|]/g, "");
                     await sendPixeldrainFile(conn, from, file.url, dlMsg, fileName);
                 }
-            });
-        });
+            };
+
+            conn.ev.on("messages.upsert", downloadListener);
+        };
+
+        conn.ev.on("messages.upsert", movieListener);
 
     } catch (e) {
         console.error("CineSubz error:", e);
