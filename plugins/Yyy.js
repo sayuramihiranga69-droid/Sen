@@ -69,16 +69,16 @@ cmd({
         await react(conn, from, m.key, "🔍");
 
         // 1️⃣ Search
+        console.log("🔎 Searching for:", q);
         const searchRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-search?q=${encodeURIComponent(q)}&apikey=09acaa863782cc46`);
         const results = searchRes.data?.data;
+        console.log("📄 Search Results:", results?.map(r => r.title));
         if (!results?.length) return reply("❌ No results found");
 
-        let listText = `🎬 *CineSubz Results*\n\n`;
+        let listText = `🎬 *Search Results*\n\n`;
         results.slice(0, 10).forEach((v, i) => { listText += `*${i+1}.* ${v.title}\n`; });
 
-        const listMsg = await conn.sendMessage(from, {
-            text: listText + `\nReply number\n\n${footer}`
-        }, { quoted: mek });
+        const listMsg = await conn.sendMessage(from, { text: listText + `\nReply number\n\n${footer}` }, { quoted: mek });
 
         // 2️⃣ Select movie
         const { msg: movieMsg, text: movieText } = await waitForReply(conn, from, listMsg.key.id);
@@ -87,15 +87,18 @@ cmd({
         await react(conn, from, movieMsg.key, "🎬");
 
         const movie = results[index];
+        console.log("🎬 Selected Movie:", movie.title);
 
-        // 3️⃣ Choose quality from Pixeldrain
+        // 3️⃣ Get Pixeldrain links from info endpoint
         const infoRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-info?url=${encodeURIComponent(movie.url)}&apikey=09acaa863782cc46`);
         const info = infoRes.data?.data;
         if (!info) return reply("❌ Failed to get movie info");
 
         const pix = info.downloads?.pixeldrain;
         if (!pix || !pix.length) return reply("❌ No Pixeldrain links found");
+        console.log("📥 Available Pixeldrain links:", pix.map(d => ({ quality: d.quality, url: d.url })));
 
+        // Show qualities to user
         let qualityList = "";
         pix.forEach((d, i) => { qualityList += `*${i+1}.* ${d.quality} (${d.size})\n`; });
 
@@ -104,17 +107,19 @@ cmd({
             caption: `🎬 *${info.title}*\n\nAvailable Downloads:\n${qualityList}\nReply download number\n${footer}`
         }, { quoted: movieMsg });
 
-        // 4️⃣ Select download
+        // 4️⃣ Select quality
         const { msg: dlMsg, text: dlText } = await waitForReply(conn, from, qualityMsg.key.id);
         const dIndex = parseInt(dlText) - 1;
         if (isNaN(dIndex) || !pix[dIndex]) return reply("❌ Invalid download number");
         await react(conn, from, dlMsg.key, "⬇️");
 
         const chosen = pix[dIndex];
+        console.log("⬇️ Chosen quality:", chosen.quality, "Link:", chosen.url);
 
-        // 5️⃣ Get real download link via /sinhalasub-download
+        // 5️⃣ Get real download link via download endpoint
         const dlRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-download?url=${encodeURIComponent(chosen.url)}&apikey=09acaa863782cc46`);
         const realUrl = dlRes.data?.data?.download;
+        console.log("✅ Real download URL:", realUrl);
         if (!realUrl) return reply("❌ Failed to get real download link");
 
         // 6️⃣ Send document
