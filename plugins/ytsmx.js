@@ -81,6 +81,7 @@ cmd({
 
     const info = data.data;
 
+    // send message with movie details
     let message = `🎬 *${info.title}*\n\n`;
     if (info.year) message += `📅 Year: ${info.year}\n`;
     if (info.quality) message += `📺 Quality: ${info.quality}\n`;
@@ -97,7 +98,7 @@ cmd({
         message += `*${idx + 1}. ${dl.quality}* (${dl.size})\n🔗 ${dl.link}\n\n`;
       });
     } else {
-      message += `❌ No download links available.`;
+      message += `❌ No download links available. Check console for full info.`;
     }
 
     // send to chat
@@ -107,16 +108,11 @@ cmd({
       reply(message);
     }
 
-    // console log
-    console.log(`🎬 Movie Details: ${info.title}`);
-    if (info.year) console.log(`📅 Year: ${info.year}`);
-    if (info.quality) console.log(`📺 Quality: ${info.quality}`);
-    if (info.rating) console.log(`⭐ Rating: ${info.rating}`);
-    if (info.duration) console.log(`⏱ Duration: ${info.duration}`);
-    if (info.country) console.log(`🌍 Country: ${info.country}`);
-    if (info.directors) console.log(`🎬 Directors: ${info.directors}`);
-    console.log(`📥 Available Download Links:`);
+    // console log full info for debugging
+    console.log("🎬 Movie Details:", info.title);
+    console.log("Raw movie info object:", info);
     if (info.downloads && info.downloads.length > 0) {
+      console.log("📥 Available Download Links:");
       info.downloads.forEach((dl, idx) => {
         console.log(`${idx + 1}. ${dl.quality} (${dl.size}) → ${dl.link}`);
       });
