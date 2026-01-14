@@ -1,7 +1,10 @@
 const { cmd } = require("../command");
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 const sharp = require("sharp");
 
+const MEGA_API_KEY = "edbcfabbca5a9750"; // Dark-Shan API key
 const FOOTER = "✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌☢️☘";
 
 // ───────── Wait for reply helper ─────────
@@ -10,13 +13,18 @@ function waitForReply(conn, from, replyToId, timeout = 120000) {
         const handler = (update) => {
             const msg = update.messages?.[0];
             if (!msg?.message) return;
+
             const ctx = msg.message?.extendedTextMessage?.contextInfo;
-            const text = msg.message.conversation || msg.message?.extendedTextMessage?.text;
+            const text =
+                msg.message.conversation ||
+                msg.message?.extendedTextMessage?.text;
+
             if (msg.key.remoteJid === from && ctx?.stanzaId === replyToId) {
                 conn.ev.off("messages.upsert", handler);
-                resolve({ msg, text });
+                resolve(text.trim());
             }
         };
+
         conn.ev.on("messages.upsert", handler);
         setTimeout(() => {
             conn.ev.off("messages.upsert", handler);
@@ -25,84 +33,125 @@ function waitForReply(conn, from, replyToId, timeout = 120000) {
     });
 }
 
-// ───────── Make thumbnail ─────────
+// ───────── Thumbnail maker ─────────
 async function makeThumbnail(url) {
     try {
         const img = await axios.get(url, { responseType: "arraybuffer" });
-        return await sharp(img.data).resize(300).jpeg({ quality: 65 }).toBuffer();
-    } catch (e) {
-        console.log("Thumbnail error:", e.message);
+        return await sharp(img.data)
+            .resize(300)
+            .jpeg({ quality: 65 })
+            .toBuffer();
+    } catch {
         return null;
     }
 }
 
-// ───────── Pirate search command ─────────
+// ───────── Pirate command ─────────
 cmd({
     pattern: "pirate",
-    desc: "Search Sinhala Movies via Pirate API and send GDrive / Mega download links only",
+    desc: "Search Pirate movies and auto download Mega file",
     category: "downloader",
     react: "🎬",
-    filename: __filename,
+    filename: __filename
 }, async (conn, mek, m, { from, q, reply }) => {
     try {
-        if (!q) return reply("❗ Example: .pirate Green");
+        if (!q) return reply("❗ Example: `.pirate Jolly`");
 
         await reply("🔍 Searching Pirate movies...");
 
-        // 1️⃣ Search API
-        const searchRes = await axios.get(`https://ty-opal-eta.vercel.app/movie/pirate/search?text=${encodeURIComponent(q)}`);
+        // 1️⃣ SEARCH
+        const searchRes = await axios.get(
+            `https://ty-opal-eta.vercel.app/movie/pirate/search?text=${encodeURIComponent(q)}`
+        );
+
         const results = searchRes.data?.result?.data;
         if (!results?.length) return reply("❌ No results found");
 
-        // 2️⃣ List top 10
-        let listText = "🎬 *Pirate Search Results*\n\n";
+        let list = "🎬 *Search Results*\n\n";
         results.slice(0, 10).forEach((v, i) => {
-            listText += `*${i + 1}.* ${v.title} | ${v.imdb || "IMDB N/A"}\n`;
+            list += `*${i + 1}.* ${v.title}\n`;
         });
-        listText += `\nReply with the number to select.\n\n${FOOTER}`;
-        const listMsg = await conn.sendMessage(from, { text: listText }, { quoted: m });
+        list += `\nReply with number\n\n${FOOTER}`;
 
-        // 3️⃣ Wait for user selection
-        const { msg: selMsg, text: selText } = await waitForReply(conn, from, listMsg.key.id);
-        const index = parseInt(selText) - 1;
-        if (isNaN(index) || !results[index]) return reply("❌ Invalid number");
+        const listMsg = await conn.sendMessage(from, { text: list }, { quoted: m });
 
-        const movie = results[index];
+        // 2️⃣ SELECT MOVIE
+        const selIndex = parseInt(await waitForReply(conn, from, listMsg.key.id)) - 1;
+        if (!results[selIndex]) return reply("❌ Invalid selection");
 
-        // 4️⃣ Get movie details
-        const detailsRes = await axios.get(`https://ty-opal-eta.vercel.app/movie/pirate/movie?url=${encodeURIComponent(movie.link)}`);
-        const data = detailsRes.data?.result?.data;
-        if (!data) return reply("❌ Failed to fetch movie details");
+        const movie = results[selIndex];
 
+        // 3️⃣ MOVIE DETAILS
+        const detailRes = await axios.get(
+            `https://ty-opal-eta.vercel.app/movie/pirate/movie?url=${encodeURIComponent(movie.link)}`
+        );
+
+        const data = detailRes.data?.result?.data;
+        if (!data) return reply("❌ Movie details not found");
+
+        // 4️⃣ FILTER MEGA LINKS
+        const megaLinks = data.dl_links?.filter(v => v.link.includes("mega.nz"));
+        if (!megaLinks?.length) return reply("❌ No Mega links available");
+
+        let qText = "📥 *Select Quality*\n\n";
+        megaLinks.forEach((v, i) => {
+            qText += `*${i + 1}.* ${v.quality} (${v.size})\n`;
+        });
+        qText += `\nReply with number\n\n${FOOTER}`;
+
+        const qMsg = await conn.sendMessage(from, { text: qText }, { quoted: m });
+
+        // 5️⃣ SELECT QUALITY
+        const qIndex = parseInt(await waitForReply(conn, from, qMsg.key.id)) - 1;
+        if (!megaLinks[qIndex]) return reply("❌ Invalid quality");
+
+        const megaUrl = megaLinks[qIndex].link;
+
+        // 6️⃣ INFO CARD
         const thumb = data.image ? await makeThumbnail(data.image) : null;
 
-        // 5️⃣ Send movie info
-        let infoText = `🎬 *${data.title}*\n`;
-        infoText += data.imdb ? `⭐ IMDB: ${data.imdb}\n` : "";
-        infoText += data.tmdb ? `⭐ TMDB: ${data.tmdb}\n` : "";
-        infoText += `📅 Date: ${data.date || "N/A"}\n`;
-        infoText += `⏱️ Runtime: ${data.runtime || "N/A"}\n`;
-        infoText += `🌎 Country: ${data.country || "N/A"}\n`;
-        infoText += `🎭 Genres: ${data.category?.join(", ") || "N/A"}\n\n`;
-        infoText += `${data.description?.slice(0, 500) || ""}...\n\n${FOOTER}`;
+        await conn.sendMessage(from, {
+            image: { url: data.image },
+            caption: `🎬 *${data.title}*\n🎞️ ${megaLinks[qIndex].quality}\n\n⬆️ Downloading...\n\n${FOOTER}`
+        }, { quoted: m });
 
-        await conn.sendMessage(from, { image: { url: data.image }, caption: infoText }, { quoted: selMsg });
+        // 7️⃣ MEGA API → REAL FILE LINK
+        const megaApi = await axios.get(
+            `https://api-dark-shan-yt.koyeb.app/download/meganz?url=${encodeURIComponent(megaUrl)}&apikey=${MEGA_API_KEY}`
+        );
 
-        // 6️⃣ Filter GDrive and Mega links only
-        const links = data.dl_links?.filter(dl => dl.link.includes("mega.nz") || dl.link.includes("drive.google.com"));
-        if (!links?.length) return reply("❌ No GDrive or Mega links available");
+        const file = megaApi.data?.data?.result?.[0];
+        if (!file?.download) return reply("❌ Mega download failed");
 
-        // 7️⃣ Send download links
-        let linksText = "📥 *GDrive / Mega Download Links*\n\n";
-        links.forEach(dl => {
-            linksText += `• ${dl.quality} (${dl.size})\n`;
-            linksText += `${dl.link}\n\n`;
+        // 8️⃣ DOWNLOAD FILE
+        const tempPath = path.join(__dirname, file.name);
+        const writer = fs.createWriteStream(tempPath);
+
+        const stream = await axios({
+            url: file.download,
+            method: "GET",
+            responseType: "stream"
         });
 
-        await conn.sendMessage(from, { text: linksText }, { quoted: selMsg });
+        stream.data.pipe(writer);
+        await new Promise((res, rej) => {
+            writer.on("finish", res);
+            writer.on("error", rej);
+        });
+
+        // 9️⃣ SEND DOCUMENT
+        await conn.sendMessage(from, {
+            document: fs.readFileSync(tempPath),
+            fileName: file.name,
+            mimetype: "video/x-matroska",
+            jpegThumbnail: thumb || undefined,
+            caption: `📥 *Download Complete*\n\n${FOOTER}`
+        }, { quoted: m });
+
+        fs.unlinkSync(tempPath);
 
     } catch (e) {
-        console.error("Pirate ERROR:", e);
+        console.error("PIRATE ERROR:", e);
         reply("⚠️ Error: " + e.message);
     }
 });
