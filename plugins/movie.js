@@ -60,7 +60,7 @@ async function sendDocFile(conn, from, info, filePath, quality, quoted) {
 
 // ───────── Command ─────────
 cmd({
-    pattern: "sinhalasub1",
+    pattern: "sinhalasubt",
     desc: "Search & download Sinhala subtitles movie with full 4-step endpoints",
     category: "downloader",
     react: "🔍",
@@ -72,7 +72,7 @@ cmd({
 
         // 1️⃣ Search → /sinhalasub-search
         console.log("🔎 Searching:", q);
-        const searchRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-search?q=${encodeURIComponent(q)}&apikey=edbcfabbca5a9750`);
+        const searchRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-search?q=${encodeURIComponent(q)}&apikey=09acaa863782cc46`);
         const results = searchRes.data?.data;
         if (!results?.length) return reply("❌ No results found");
         console.log("📄 Search results:", results.map(r => r.title));
@@ -91,7 +91,7 @@ cmd({
 
         // 3️⃣ Info → /sinhalasub-info
         console.log("📥 Fetching movie info and Pixeldrain page link...");
-        const infoRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-info?url=${encodeURIComponent(movie.url)}&apikey=edbcfabbca5a9750`);
+        const infoRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-info?url=${encodeURIComponent(movie.url)}&apikey=09acaa863782cc46`);
         const info = infoRes.data?.data;
         if (!info) return reply("❌ Failed to get movie info");
 
@@ -116,14 +116,14 @@ cmd({
 
         // 5️⃣ Pixeldrain page → /sinhalasub-download
         console.log("🌐 Fetching Pixeldrain download page link...");
-        const pageRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-download?url=${encodeURIComponent(chosen.url)}&apikey=edbcfabbca5a9750`);
+        const pageRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-download?url=${encodeURIComponent(chosen.url)}&apikey=09acaa863782cc46`);
         const pageLink = pageRes.data?.data?.download;
         if (!pageLink) return reply("❌ Failed to get Pixeldrain page link");
         console.log("🔗 Pixeldrain page link:", pageLink);
 
         // 6️⃣ Real download → /download/pixeldrain
         console.log("🌐 Fetching real direct download URL...");
-        const dlRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/download/pixeldrain?url=${encodeURIComponent(pageLink)}&apikey=edbcfabbca5a9750`);
+        const dlRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/download/pixeldrain?url=${encodeURIComponent(pageLink)}&apikey=09acaa863782cc46`);
         const realUrl = dlRes.data?.data?.download;
         if (!realUrl) return reply("❌ Failed to get real download URL");
         console.log("✅ Real download URL:", realUrl);
