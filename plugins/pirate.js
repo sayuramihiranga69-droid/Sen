@@ -44,7 +44,7 @@ async function makeThumbnail(url) {
 // ───────── Pirate search + download ─────────
 cmd({
     pattern: "pirate",
-    desc: "Search Pirate movies + info card + Mega qualities + auto download",
+    desc: "Search Pirate movies + info card + Mega qualities + auto download + react",
     category: "downloader",
     react: "🎬",
     filename: __filename
@@ -52,6 +52,8 @@ cmd({
     try {
         if (!q) return reply("❗ Example: `.pirate Jolly`");
 
+        // React for search start
+        await conn.sendMessage(from, { react: { text: "🔍", key: m.key } });
         await reply("🔍 Searching Pirate movies...");
 
         // 1️⃣ Search API
@@ -68,6 +70,9 @@ cmd({
         });
         listText += `\nReply with the number to select.\n\n${FOOTER}`;
         const listMsg = await conn.sendMessage(from, { text: listText }, { quoted: m });
+
+        // React for list sent
+        await conn.sendMessage(from, { react: { text: "📋", key: listMsg.key } });
 
         // 3️⃣ Wait for user selection
         const selText = await waitForReply(conn, from, listMsg.key.id);
@@ -96,6 +101,7 @@ cmd({
         infoText += `${data.description?.slice(0, 500) || ""}...\n\n${FOOTER}`;
 
         await conn.sendMessage(from, { image: { url: data.image }, caption: infoText }, { quoted: m });
+        await conn.sendMessage(from, { react: { text: "📝", key: m.key } });
 
         // 6️⃣ Filter Mega links only
         const megaLinks = data.dl_links?.filter(dl => dl.link.includes("mega.nz"));
@@ -109,6 +115,9 @@ cmd({
         qualityText += `\nReply with the number to download\n\n${FOOTER}`;
         const qualityMsg = await conn.sendMessage(from, { text: qualityText }, { quoted: m });
 
+        // React for quality list
+        await conn.sendMessage(from, { react: { text: "🎚️", key: qualityMsg.key } });
+
         // 8️⃣ Wait for quality selection
         const qSel = await waitForReply(conn, from, qualityMsg.key.id);
         const qIndex = parseInt(qSel) - 1;
@@ -116,8 +125,11 @@ cmd({
 
         const file = megaLinks[qIndex];
 
-        // 9️⃣ Download via Dark-Shan Mega API
+        // React for download start
+        await conn.sendMessage(from, { react: { text: "⬇️", key: m.key } });
         await reply(`🔄 Downloading *${file.quality}*...`);
+
+        // 9️⃣ Download via Dark-Shan Mega API
         const apiRes = await axios.get(
             `https://api-dark-shan-yt.koyeb.app/download/meganz?url=${encodeURIComponent(file.link)}&apikey=${MEGA_API_KEY}`
         );
@@ -140,6 +152,9 @@ cmd({
             writer.on("finish", resolve);
             writer.on("error", reject);
         });
+
+        // React for file sent
+        await conn.sendMessage(from, { react: { text: "✅", key: m.key } });
 
         // 10️⃣ Send file
         await conn.sendMessage(from, {
