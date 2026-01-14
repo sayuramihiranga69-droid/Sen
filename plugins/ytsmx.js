@@ -1,9 +1,7 @@
 const { cmd } = require('../command');
 const axios = require('axios');
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Temporary cache per user to store search results
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const cineCache = {};
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -28,7 +26,7 @@ cmd({
     if (!data.status || !data.data || data.data.length === 0)
       return reply("❌ No results found.");
 
-    const results = data.data.slice(0, 10); // top 10 results
+    const results = data.data.slice(0, 10); // top 10
     cineCache[from] = results; // save for number reply
 
     let message = `🎬 *CineSubz Search Results*\n\n🔎 Query: *${q}*\n📊 Found: ${data.data.length} results\n\n━━━━━━━━━━━━━━━━━━━━━━\n\n`;
@@ -44,6 +42,12 @@ cmd({
     message += `━━━━━━━━━━━━━━━━━━━━━━\n\n📌 Reply with the *number* of the movie to get details & download links`;
 
     await conn.sendMessage(from, { text: message }, { quoted: mek });
+
+    // console log
+    console.log(`🔎 Search Results for "${q}"`);
+    results.forEach((item, i) => {
+      console.log(`${i + 1}. ${item.title} | Type: ${item.type} | Quality: ${item.quality} | Rating: ${item.rating}`);
+    });
   } catch (e) {
     console.error("Search error:", e);
     reply(`❌ Error: ${e.message}`);
@@ -96,11 +100,30 @@ cmd({
       message += `❌ No download links available.`;
     }
 
+    // send to chat
     if (info.image) {
       await conn.sendMessage(from, { image: { url: info.image }, caption: message }, { quoted: mek });
     } else {
       reply(message);
     }
+
+    // console log
+    console.log(`🎬 Movie Details: ${info.title}`);
+    if (info.year) console.log(`📅 Year: ${info.year}`);
+    if (info.quality) console.log(`📺 Quality: ${info.quality}`);
+    if (info.rating) console.log(`⭐ Rating: ${info.rating}`);
+    if (info.duration) console.log(`⏱ Duration: ${info.duration}`);
+    if (info.country) console.log(`🌍 Country: ${info.country}`);
+    if (info.directors) console.log(`🎬 Directors: ${info.directors}`);
+    console.log(`📥 Available Download Links:`);
+    if (info.downloads && info.downloads.length > 0) {
+      info.downloads.forEach((dl, idx) => {
+        console.log(`${idx + 1}. ${dl.quality} (${dl.size}) → ${dl.link}`);
+      });
+    } else {
+      console.log("❌ No download links available.");
+    }
+
   } catch (e) {
     console.error("Details error:", e);
     reply(`❌ Error: ${e.message}`);
