@@ -26,7 +26,7 @@ async function makeThumbnail(url) {
 }
 
 // ───────── Wait for reply helper ─────────
-function waitForReply(conn, from, replyToId, timeout = 60000) {
+function waitForReply(conn, from, replyToId, timeout = 120000) {
     return new Promise((resolve, reject) => {
         const handler = (update) => {
             const msg = update.messages?.[0];
@@ -50,35 +50,49 @@ function waitForReply(conn, from, replyToId, timeout = 60000) {
     });
 }
 
-// ───────── Send document with poster thumbnail and quality footer ─────────
-async function sendMovie(conn, from, info, file, quoted) {
+// ───────── Send document with thumbnail & full info ─────────
+async function sendMovie(conn, from, info, file, quoted, chosenQuality) {
     let thumbnail = null;
     if (info.image) thumbnail = await makeThumbnail(info.image);
 
-    const captionText = `*${file.quality}*\n${cinesubz_footer}`;
+    // Build full caption
+    let caption = `🎬 *${info.title}*\n\n`;
+    if (info.year) caption += `📅 Year: ${info.year}\n`;
+    caption += `📺 Quality: ${chosenQuality}\n`;
+    if (info.rating) caption += `⭐ Rating: ${info.rating}\n`;
+    if (info.duration) caption += `⏱ Duration: ${info.duration}\n`;
+    if (info.country) caption += `🌍 Country: ${info.country}\n`;
+    if (info.directors) caption += `🎬 Directors: ${info.directors}\n\n`;
+
+    // List all available downloads
+    if (info.downloads && info.downloads.length > 0) {
+        info.downloads.forEach((d, i) => {
+            caption += `*${i + 1}.* ${d.quality} (${d.size})\n`;
+        });
+    }
+    caption += `\n${cinesubz_footer}`;
 
     const docMsg = await conn.sendMessage(from, {
         document: { url: file.url },
-        fileName: `${info.title} (${file.quality}).mp4`.replace(/[\/\\:*?"<>|]/g, ""),
+        fileName: `${info.title} (${chosenQuality}).mp4`.replace(/[\/\\:*?"<>|]/g, ""),
         mimetype: "video/mp4",
         jpegThumbnail: thumbnail || undefined,
-        caption: captionText
+        caption
     }, { quoted });
 
     await react(conn, from, docMsg.key, "✅");
 }
 
-// ───────── CineSubz command ─────────
+// ───────── Command ─────────
 cmd({
     pattern: "cinesubsk",
-    desc: "CineSubz download with document thumbnail and quality in footer",
+    desc: "CineSubz download with full info + thumbnail + stable reply",
     category: "downloader",
     react: "🔍",
     filename: __filename
 }, async (conn, mek, m, { from, q, reply }) => {
     try {
         if (!q) return reply("❗ Example: .cinesubsk Avatar");
-
         await react(conn, from, m.key, "🔍");
 
         // 1️⃣ Search
@@ -99,11 +113,17 @@ cmd({
         }, { quoted: mek });
 
         // 2️⃣ Select movie
-        const { msg: movieMsg, text: movieText } = await waitForReply(conn, from, listMsg.key.id);
-        const index = parseInt(movieText) - 1;
+        let movieReply;
+        try {
+            movieReply = await waitForReply(conn, from, listMsg.key.id);
+        } catch {
+            return reply("⚠️ Timeout. Please try again.");
+        }
+
+        const index = parseInt(movieReply.text) - 1;
         if (isNaN(index) || !results[index]) return reply("❌ Invalid number");
 
-        await react(conn, from, movieMsg.key, "🎬");
+        await react(conn, from, movieReply.msg.key, "🎬");
 
         const movie = results[index];
 
@@ -123,14 +143,20 @@ cmd({
         const infoMsg = await conn.sendMessage(from, {
             image: { url: info.image },
             caption: infoText + `\n\nReply download number\n${cinesubz_footer}`
-        }, { quoted: movieMsg });
+        }, { quoted: movieReply.msg });
 
         // 4️⃣ Select download
-        const { msg: dlMsg, text: dlText } = await waitForReply(conn, from, infoMsg.key.id);
-        const dIndex = parseInt(dlText) - 1;
+        let dlReply;
+        try {
+            dlReply = await waitForReply(conn, from, infoMsg.key.id);
+        } catch {
+            return reply("⚠️ Timeout. Please try again.");
+        }
+
+        const dIndex = parseInt(dlReply.text) - 1;
         if (isNaN(dIndex) || !info.downloads[dIndex]) return reply("❌ Invalid download number");
 
-        await react(conn, from, dlMsg.key, "⬇️");
+        await react(conn, from, dlReply.msg.key, "⬇️");
 
         const chosen = info.downloads[dIndex];
 
@@ -141,7 +167,7 @@ cmd({
         const pix = dlRes.data?.data?.download?.find(v => v.name.toUpperCase().includes("PIX"));
         if (!pix) return reply("❌ Pixeldrain link not found");
 
-        await sendMovie(conn, from, info, { url: pix.url, quality: chosen.quality }, dlMsg);
+        await sendMovie(conn, from, info, { url: pix.url }, dlReply.msg, chosen.quality);
 
     } catch (e) {
         console.error("CINESUBZ ERROR FULL:", e);
