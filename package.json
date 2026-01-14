@@ -35,6 +35,7 @@
     "megajs": "latest",
     "mongoose": "8.18.1",
     "seedr": "latest",
+   "api-dylux":"latest",
     "adm-zip": "latest",
     "uuid": "latest",
     "wikipedia": "latest",
