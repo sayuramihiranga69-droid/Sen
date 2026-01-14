@@ -1,92 +1,103 @@
 const { cmd } = require('../command');
 const axios = require('axios');
 
-// ================= GLOBAL =================
-global.lastCineSearch = global.lastCineSearch || [];
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// GLOBAL STORAGE FOR LAST SEARCH
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+global.lastCineSearch = {};
 
-// ================= CINESEARCH =================
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 1️⃣ SEARCH COMMAND
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 cmd({
     pattern: "cinesearch",
     alias: ["moviesearch", "csearch"],
-    react: "🔍",
+    desc: "Search for movies/TV shows on CineSubz",
     category: "downloader",
-    desc: "Search movies/TV on CineSubz",
+    react: "🔍",
     filename: __filename
-}, async (conn, m, mek, { from, q, prefix, reply }) => {
+}, async (conn, mek, m, { from, q, prefix, reply }) => {
     try {
         if (!q) return reply("❗ Please provide a search query\nExample: .cinesearch Avatar");
 
-        reply("🔍 Searching CineSubz...");
+        await conn.sendMessage(from, { text: "🔍 Searching CineSubz..." });
 
         const url = `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-search?q=${encodeURIComponent(q)}&apikey=deb4e2d4982c6bc2`;
         const { data } = await axios.get(url);
 
-        if (!data.status || !data.data || data.data.length === 0)
+        if (!data.status || !data.data || data.data.length === 0) {
             return reply("❌ No results found.");
+        }
 
-        // Save last search globally
-        global.lastCineSearch = data.data.slice(0, 10);
+        // Save last search for number reply
+        global.lastCineSearch[from] = data.data.slice(0, 10);
 
-        // Prepare list message
-        const rows = global.lastCineSearch.map((item, i) => ({
-            title: `${i+1}. ${item.title}`,
-            rowId: prefix + 'cinenum ' + (i+1)
-        }));
+        // Prepare sections for list message
+        const sections = [{
+            title: "_Search Results_",
+            rows: global.lastCineSearch[from].map((item, index) => ({
+                title: `${index + 1}. ${item.title}`,
+                description: `${item.type || ''} | ${item.quality || ''} | ⭐ ${item.rating || 'N/A'}`,
+                rowId: prefix + 'cinenum ' + (index + 1)
+            }))
+        }];
 
         const listMessage = {
-            text: `🎬 CineSubz Search Results for: ${q}\n\nReply with a number to get details.`,
+            text: `🎬 CineSubz Search Results for: *${q}*\n\n📌 Reply with a number to get details.`,
             footer: 'CineSubz Downloader',
+            title: 'Select a Number',
             buttonText: 'Select Number',
-            sections: [{ title: '_Results_', rows }]
+            sections
         };
 
-        await conn.replyList(from, listMessage, { quoted: mek });
+        await conn.sendMessage(from, listMessage, { quoted: mek });
 
     } catch (e) {
-        console.error("CineSearch Error:", e);
-        reply("❌ Error: " + e.message);
+        console.error("Search error:", e);
+        reply(`❌ Error: ${e.message}`);
     }
 });
 
-// ================= CINESEARCH NUMBER REPLY =================
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 2️⃣ NUMBER REPLY HANDLER
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 cmd({
     pattern: "cinenum",
-    dontAddCommandList: true,
+    desc: "Get CineSubz details by number",
+    category: "downloader",
     filename: __filename
-}, async (conn, m, mek, { from, q, reply }) => {
+}, async (conn, mek, m, { from, q, reply }) => {
     try {
-        if (!global.lastCineSearch || !global.lastCineSearch.length)
-            return reply("*No previous search found!*");
+        if (!q) return reply("❗ Please reply with a number from the search list.");
 
         const num = parseInt(q);
-        if (isNaN(num) || num < 1 || num > global.lastCineSearch.length)
-            return reply("*Invalid number!*");
+        if (!num || num < 1 || num > 10) return reply("❌ Invalid number. Please choose between 1-10.");
 
-        const movie = global.lastCineSearch[num - 1];
+        const item = global.lastCineSearch[from][num - 1];
+        if (!item) return reply("❌ Could not find the selected movie.");
 
-        // Fetch movie details
-        const apiUrl = `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-info?url=${encodeURIComponent(movie.link)}&apikey=deb4e2d4982c6bc2`;
+        // Show details using cinedetails API
+        const apiUrl = `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-info?url=${encodeURIComponent(item.link)}&apikey=deb4e2d4982c6bc2`;
         const { data } = await axios.get(apiUrl);
 
         if (!data.status || !data.data) return reply("❌ Failed to fetch movie details.");
 
         const info = data.data;
-
         let message = `🎬 *${info.title}*\n\n`;
         if (info.year) message += `📅 Year: ${info.year}\n`;
         if (info.quality) message += `📺 Quality: ${info.quality}\n`;
         if (info.rating) message += `⭐ Rating: ${info.rating}\n`;
         if (info.duration) message += `⏱ Duration: ${info.duration}\n`;
         if (info.country) message += `🌍 Country: ${info.country}\n`;
-        if (info.directors) message += `🎬 Directors: ${info.directors}\n\n`;
+        if (info.directors) message += `🎬 Directors: ${info.directors}\n`;
 
         if (info.downloads && info.downloads.length > 0) {
-            message += `📥 *Available Download Links:*\n`;
+            message += `\n📥 Available Download Links:\n`;
             info.downloads.forEach((dl, idx) => {
                 message += `*${idx + 1}. ${dl.name.toUpperCase()}* → ${dl.url}\n`;
             });
         } else {
-            message += `❌ No download links available.`;
+            message += `\n❌ No download links available.`;
         }
 
         if (info.image) {
@@ -96,33 +107,42 @@ cmd({
         }
 
     } catch (e) {
-        console.error("CineNumber Error:", e);
-        reply("❌ Error: " + e.message);
+        console.error("Number reply error:", e);
+        reply(`❌ Error: ${e.message}`);
     }
 });
 
-// ================= CINE DOWNLOAD COMMAND (OPTIONAL) =================
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 3️⃣ DOWNLOAD LINKS COMMAND
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 cmd({
     pattern: "cinedownload",
     alias: ["cinedl", "cdl"],
-    desc: "Download movie from Pixeldrain/Telegram links",
+    desc: "Fetch Pixeldrain/Telegram download links",
     category: "downloader",
     react: "📥",
     filename: __filename
-}, async (conn, m, mek, { from, q, reply }) => {
+}, async (conn, mek, m, { from, q, reply }) => {
     try {
-        if (!q) return reply("❗ Please provide a download link\nExample: .cinedownload <link>");
+        if (!q) return reply("❗ Please provide a CineSubz download URL\nExample: .cinedownload <link>");
 
-        await conn.sendMessage(from, {
-            document: { url: q },
-            mimetype: "video/mp4",
-            fileName: `CineSubz_${Date.now()}.mp4`,
-            caption: "✅ Downloaded via CineSubz API"
-        }, { quoted: mek });
+        const apiUrl = `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-download?url=${encodeURIComponent(q)}&apikey=deb4e2d4982c6bc2`;
+        const { data } = await axios.get(apiUrl);
 
-        reply("✅ Download command executed. File should start sending shortly.");
+        if (!data.status || !data.data || !data.data.download || data.data.download.length === 0) {
+            return reply("❌ Failed to fetch download links.");
+        }
+
+        let message = `📥 *Download Links for ${data.data.title}*\n\n`;
+        data.data.download.forEach((dl, idx) => {
+            message += `*${idx + 1}. ${dl.name.toUpperCase()}* → ${dl.url}\n\n`;
+        });
+
+        message += `━━━━━━━━━━━━━━━━━━━━━━\n\n📌 Use your browser or Telegram to download the file.`;
+        await conn.sendMessage(from, { text: message }, { quoted: mek });
+
     } catch (e) {
-        console.error("Download Error:", e);
-        reply("❌ Download failed: " + e.message);
+        console.error("Download API error:", e);
+        reply(`❌ Failed to fetch download links: ${e.message}`);
     }
 });
