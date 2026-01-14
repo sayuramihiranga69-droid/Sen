@@ -2,7 +2,7 @@ const { cmd } = require('../command');
 const axios = require('axios');
 const sharp = require('sharp');
 
-const sinhalaSub_footer = "✫☘ 𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌☢️☘";
+const footer = "✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌☢️☘";
 
 // ───────── React helper ─────────
 async function react(conn, jid, key, emoji) {
@@ -41,16 +41,16 @@ function waitForReply(conn, from, replyToId, timeout = 120000) {
     });
 }
 
-// ───────── Send document with caption ─────────
-async function sendDocWithCaption(conn, from, info, file, quoted) {
+// ───────── Send document ─────────
+async function sendDoc(conn, from, info, file, quoted) {
     const thumb = info.image ? await makeThumbnail(info.image) : null;
-    const captionText = `🎬 *${info.title}*\n*${file.quality}*\n${sinhalaSub_footer}`;
+    const caption = `🎬 *${info.title}*\n*${file.quality}*\n${footer}`;
     const docMsg = await conn.sendMessage(from, {
         document: { url: file.url },
         fileName: `${info.title} (${file.quality}).mp4`.replace(/[\/\\:*?"<>|]/g,""),
         mimetype: "video/mp4",
         jpegThumbnail: thumb || undefined,
-        caption: captionText
+        caption
     }, { quoted });
     await react(conn, from, docMsg.key, "✅");
 }
@@ -58,27 +58,26 @@ async function sendDocWithCaption(conn, from, info, file, quoted) {
 // ───────── Command ─────────
 cmd({
     pattern: "sinhalasubt",
-    desc: "Sinhala Sub movie download with real Pixeldrain link",
+    desc: "Search & download Sinhala subtitles movie",
     category: "downloader",
     react: "🔍",
     filename: __filename
 }, async (conn, mek, m, { from, q, reply }) => {
     try {
-        if (!q) return reply("❗ Example: .sinhalasubt Avatar");
+        if (!q) return reply("❗ Example: .sinhalasubt New");
+
         await react(conn, from, m.key, "🔍");
 
         // 1️⃣ Search
-        const searchRes = await axios.get(
-            `https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-search?q=${encodeURIComponent(q)}&apikey=09acaa863782cc46`
-        );
+        const searchRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-search?q=${encodeURIComponent(q)}&apikey=09acaa863782cc46`);
         const results = searchRes.data?.data;
         if (!results?.length) return reply("❌ No results found");
 
-        let listText = `🎬 *Sinhala Sub Results*\n\n`;
-        results.slice(0, 10).forEach((v, i) => { listText += `*${i + 1}.* ${v.title}\n`; });
+        let listText = `🎬 *CineSubz Results*\n\n`;
+        results.slice(0, 10).forEach((v, i) => { listText += `*${i+1}.* ${v.title}\n`; });
 
         const listMsg = await conn.sendMessage(from, {
-            text: listText + `\nReply number\n\n${sinhalaSub_footer}`
+            text: listText + `\nReply number\n\n${footer}`
         }, { quoted: mek });
 
         // 2️⃣ Select movie
@@ -89,44 +88,40 @@ cmd({
 
         const movie = results[index];
 
-        // 3️⃣ Get info (needed for Pixeldrain base URL)
-        const infoRes = await axios.get(
-            `https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-info?url=${encodeURIComponent(movie.url)}&apikey=09acaa863782cc46`
-        );
+        // 3️⃣ Choose quality from Pixeldrain
+        const infoRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-info?url=${encodeURIComponent(movie.url)}&apikey=09acaa863782cc46`);
         const info = infoRes.data?.data;
         if (!info) return reply("❌ Failed to get movie info");
 
-        // 4️⃣ Prepare Pixeldrain download options
-        const downloads = info.downloads?.pixeldrain;
-        if (!downloads?.length) return reply("❌ No Pixeldrain downloads available");
+        const pix = info.downloads?.pixeldrain;
+        if (!pix || !pix.length) return reply("❌ No Pixeldrain links found");
 
-        let dlTextList = `🎬 *${info.title}* Available Downloads:\n\n`;
-        downloads.forEach((d, i) => { dlTextList += `*${i + 1}.* ${d.quality} (${d.size})\n`; });
+        let qualityList = "";
+        pix.forEach((d, i) => { qualityList += `*${i+1}.* ${d.quality} (${d.size})\n`; });
 
-        const dlMsgList = await conn.sendMessage(from, {
-            text: dlTextList + `\nReply download number\n${sinhalaSub_footer}`
+        const qualityMsg = await conn.sendMessage(from, {
+            image: { url: info.image },
+            caption: `🎬 *${info.title}*\n\nAvailable Downloads:\n${qualityList}\nReply download number\n${footer}`
         }, { quoted: movieMsg });
 
-        // 5️⃣ Select quality
-        const { msg: dlMsg, text: dlText } = await waitForReply(conn, from, dlMsgList.key.id);
+        // 4️⃣ Select download
+        const { msg: dlMsg, text: dlText } = await waitForReply(conn, from, qualityMsg.key.id);
         const dIndex = parseInt(dlText) - 1;
-        if (isNaN(dIndex) || !downloads[dIndex]) return reply("❌ Invalid download number");
+        if (isNaN(dIndex) || !pix[dIndex]) return reply("❌ Invalid download number");
         await react(conn, from, dlMsg.key, "⬇️");
 
-        const chosen = downloads[dIndex];
+        const chosen = pix[dIndex];
 
-        // 6️⃣ Send Pixeldrain base URL to download endpoint to get real file link
-        const dlRes = await axios.get(
-            `https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-download?url=${encodeURIComponent(chosen.url)}&apikey=09acaa863782cc46`
-        );
-        const realLink = dlRes.data?.data?.download;
-        if (!realLink) return reply("❌ Failed to get real download link");
+        // 5️⃣ Get real download link via /sinhalasub-download
+        const dlRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-download?url=${encodeURIComponent(chosen.url)}&apikey=09acaa863782cc46`);
+        const realUrl = dlRes.data?.data?.download;
+        if (!realUrl) return reply("❌ Failed to get real download link");
 
-        // 7️⃣ Send document
-        await sendDocWithCaption(conn, from, info, { url: realLink, quality: chosen.quality }, dlMsg);
+        // 6️⃣ Send document
+        await sendDoc(conn, from, info, { url: realUrl, quality: chosen.quality }, dlMsg);
 
     } catch (e) {
-        console.error("SINHALA SUB ERROR:", e);
+        console.error("SINHALASUB ERROR:", e);
         reply("⚠️ Error:\n" + e.message);
     }
 });
