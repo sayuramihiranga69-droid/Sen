@@ -3,150 +3,123 @@ const axios = require('axios');
 
 const cinesubz_footer = "✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌𝐄☢️☘";
 
-// ─────────────────────────────────────
-// Send poster image + mp4 document
-// ─────────────────────────────────────
-async function sendMovie(conn, from, info, file, quoted) {
-    const fileName = `${info.title} (${info.year}) ${file.quality} [CineSubz].mp4`
-        .replace(/[\/\\:*?"<>|]/g, "");
+// ─── React helper ───────────────────────────────
+async function react(conn, jid, key, emoji) {
+    try {
+        await conn.sendMessage(jid, {
+            react: { text: emoji, key }
+        });
+    } catch {}
+}
 
-    // 1️⃣ Poster image (this is what you want to SEE)
+// ─── Send poster + document ─────────────────────
+async function sendMovie(conn, from, info, file, quoted) {
+
+    // 1️⃣ Poster (image)
     if (info.image) {
-        await conn.sendMessage(from, {
+        const posterMsg = await conn.sendMessage(from, {
             image: { url: info.image },
-            caption: `🎬 *${info.title}*\n📺 ${file.quality}\n\n${cinesubz_footer}`
+            caption: `🎬 *${info.title}*\n📺 ${file.quality}\n📦 ${file.size}\n\n${cinesubz_footer}`
         }, { quoted });
+
+        await react(conn, from, posterMsg.key, "🖼️");
     }
 
-    // 2️⃣ Document (safe for big files)
-    await conn.sendMessage(from, {
+    // 2️⃣ Document (video)
+    const docMsg = await conn.sendMessage(from, {
         document: { url: file.url },
-        fileName,
+        fileName: `${info.title} (${file.quality}).mp4`.replace(/[\/\\:*?"<>|]/g, ""),
         mimetype: "video/mp4",
         caption: cinesubz_footer
     }, { quoted });
 
-    await conn.sendMessage(from, {
-        react: { text: "✅", key: quoted.key }
-    });
+    await react(conn, from, docMsg.key, "✅");
 }
 
-// ─────────────────────────────────────
-// Command
-// ─────────────────────────────────────
+// ─── Command ────────────────────────────────────
 cmd({
     pattern: "cinesubsk",
-    desc: "Search CineSubz and download",
+    desc: "CineSubz search & download",
     category: "downloader",
     react: "🔍",
     filename: __filename
 }, async (conn, mek, m, { from, q, reply }) => {
-    try {
-        if (!q) return reply("❗ Example: .cinesubsk Avatar");
 
-        // 🔍 SEARCH
-        const searchUrl =
-            `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-search?q=${encodeURIComponent(q)}&apikey=deb4e2d4982c6bc2`;
-        const searchRes = await axios.get(searchUrl);
-        const results = searchRes.data?.data;
+    if (!q) return reply("❗ Example: .cinesubsk Avatar");
 
-        if (!results || results.length === 0)
-            return reply("❌ No results found");
+    await react(conn, from, m.key, "🔍");
 
-        let listText = `🎬 *CineSubz Results*\n\n`;
-        results.slice(0, 10).forEach((m, i) => {
-            listText += `*${i + 1}. ${m.title}*\n`;
+    // 1️⃣ Search
+    const search = await axios.get(
+        `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-search?q=${encodeURIComponent(q)}&apikey=deb4e2d4982c6bc2`
+    );
+
+    const results = search.data?.data;
+    if (!results || !results.length) return reply("❌ No results");
+
+    let text = `🎬 *CineSubz Results*\n\n`;
+    results.slice(0, 10).forEach((m, i) => {
+        text += `*${i + 1}.* ${m.title}\n`;
+    });
+
+    const listMsg = await conn.sendMessage(from, {
+        text: text + `\nReply number\n\n${cinesubz_footer}`
+    }, { quoted: mek });
+
+    // 2️⃣ Select movie
+    conn.ev.once("messages.upsert", async ({ messages }) => {
+        const msg = messages[0];
+        const num = parseInt(msg.message?.conversation);
+        if (!num || !results[num - 1]) return;
+
+        await react(conn, from, msg.key, "🎬");
+
+        const chosen = results[num - 1];
+
+        // 3️⃣ Movie info
+        const infoRes = await axios.get(
+            `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-info?url=${encodeURIComponent(chosen.link)}&apikey=deb4e2d4982c6bc2`
+        );
+
+        const info = infoRes.data?.data;
+        if (!info) return reply("❌ Info error");
+
+        let infoText = `🎬 *${info.title}*\n\n`;
+        info.downloads.forEach((d, i) => {
+            infoText += `*${i + 1}.* ${d.quality} (${d.size})\n`;
         });
 
-        const listMsg = await conn.sendMessage(from, {
-            text: listText + `\nReply number\n\n${cinesubz_footer}`
-        }, { quoted: mek });
+        const infoMsg = await conn.sendMessage(from, {
+            image: { url: info.image },
+            caption: infoText + `\n\nReply download number\n${cinesubz_footer}`
+        }, { quoted: msg });
 
-        const listId = listMsg.key.id;
+        // 4️⃣ Select quality
+        conn.ev.once("messages.upsert", async ({ messages }) => {
+            const dmsg = messages[0];
+            const dnum = parseInt(dmsg.message?.conversation);
+            if (!dnum || !info.downloads[dnum - 1]) return;
 
-        // ─────────────────────────────
-        // Movie select
-        // ─────────────────────────────
-        conn.ev.on("messages.upsert", async ({ messages }) => {
-            const msg = messages?.[0];
-            if (!msg?.message) return;
+            await react(conn, from, dmsg.key, "⬇️");
 
-            const text =
-                msg.message.conversation ||
-                msg.message.extendedTextMessage?.text;
+            const chosenDl = info.downloads[dnum - 1];
 
-            const isReply =
-                msg.message.extendedTextMessage?.contextInfo?.stanzaId === listId;
-            if (!isReply) return;
+            // 5️⃣ Download links
+            const dlRes = await axios.get(
+                `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-download?url=${encodeURIComponent(chosenDl.link)}&apikey=deb4e2d4982c6bc2`
+            );
 
-            const index = parseInt(text) - 1;
-            if (isNaN(index) || !results[index]) return;
+            const pix = dlRes.data?.data?.download?.find(v =>
+                v.name.toUpperCase().includes("PIX")
+            );
 
-            const movie = results[index];
+            if (!pix) return reply("❌ Pixeldrain not found");
 
-            // 🎬 INFO
-            const infoUrl =
-                `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-info?url=${encodeURIComponent(movie.link)}&apikey=deb4e2d4982c6bc2`;
-            const infoRes = await axios.get(infoUrl);
-            const info = infoRes.data?.data;
-
-            if (!info) return reply("❌ Info error", msg);
-
-            let infoText =
-                `🎬 *${info.title}*\n` +
-                `📅 ${info.year}\n` +
-                `📺 ${info.quality}\n` +
-                `⭐ ${info.rating}\n\n` +
-                `📥 *Available Downloads:*\n`;
-
-            info.downloads.forEach((d, i) => {
-                infoText += `*${i + 1}. ${d.quality}* (${d.size})\n`;
-            });
-
-            const infoMsg = await conn.sendMessage(from, {
-                image: { url: info.image },
-                caption: infoText + `\nReply number\n\n${cinesubz_footer}`
-            }, { quoted: msg });
-
-            const infoId = infoMsg.key.id;
-
-            // ─────────────────────────────
-            // Download select
-            // ─────────────────────────────
-            conn.ev.on("messages.upsert", async ({ messages: dmsgs }) => {
-                const dmsg = dmsgs?.[0];
-                if (!dmsg?.message) return;
-
-                const dtext =
-                    dmsg.message.conversation ||
-                    dmsg.message.extendedTextMessage?.text;
-
-                const isReply2 =
-                    dmsg.message.extendedTextMessage?.contextInfo?.stanzaId === infoId;
-                if (!isReply2) return;
-
-                const dIndex = parseInt(dtext) - 1;
-                if (isNaN(dIndex) || !info.downloads[dIndex]) return;
-
-                const chosen = info.downloads[dIndex];
-
-                const dlRes = await axios.get(
-                    `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-download?url=${encodeURIComponent(chosen.link)}&apikey=deb4e2d4982c6bc2`
-                );
-
-                const pix = dlRes.data?.data?.download?.find(v =>
-                    v.name.toUpperCase().includes("PIX")
-                );
-
-                if (!pix) return reply("❌ Pixeldrain link not found", dmsg);
-
-                // ✅ SEND POSTER + DOCUMENT
-                await sendMovie(conn, from, info, pix, dmsg);
-            });
+            await sendMovie(conn, from, info, {
+                url: pix.url,
+                quality: chosenDl.quality,
+                size: chosenDl.size
+            }, dmsg);
         });
-
-    } catch (err) {
-        console.error(err);
-        reply("❌ Error occurred");
-    }
+    });
 });
