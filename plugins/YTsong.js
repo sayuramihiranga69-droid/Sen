@@ -114,7 +114,7 @@ cmd({
     } else {
       // 7️⃣ Movie type (SUBTITLE)
       if (!dl.gdrive) return reply("❌ GDrive not available for this movie");
-      await conn.sendMessage(from, { image: { url: poster }, caption: `🎬 *${movie.title}*\n\n⬇️ Downloading from Google Drive...\n\n${FOOTER}` }, { quoted: selMsg });
+      await conn.sendMessage(from, { image: { url: "https://files.catbox.moe/d0v6fe.png" }, caption: `🎬 *${movie.title}*\n\n⬇️ Downloading from Google Drive...\n\n${FOOTER}` }, { quoted: selMsg });
       const uploading = await conn.sendMessage(from, { text: "⬆️ Uploading movie, please wait..." }, { quoted: selMsg });
       await react(conn, from, uploading.key, "⏳");
 
