@@ -4,14 +4,14 @@ const sharp = require('sharp');
 
 const cinesubz_footer = "✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌𝐄☢️☘";
 
-// React helper
+// ───────── React helper ─────────
 async function react(conn, jid, key, emoji) {
     try {
         await conn.sendMessage(jid, { react: { text: emoji, key } });
     } catch {}
 }
 
-// Create thumbnail from poster
+// ───────── Create thumbnail ─────────
 async function makeThumbnail(url) {
     try {
         const img = await axios.get(url, { responseType: "arraybuffer", timeout: 15000 });
@@ -25,7 +25,7 @@ async function makeThumbnail(url) {
     }
 }
 
-// Wait for reply
+// ───────── Wait for reply helper ─────────
 function waitForReply(conn, from, replyToId, timeout = 60000) {
     return new Promise((resolve, reject) => {
         const handler = (update) => {
@@ -50,34 +50,35 @@ function waitForReply(conn, from, replyToId, timeout = 60000) {
     });
 }
 
-// Send document with poster thumbnail
+// ───────── Send document with poster thumbnail and quality footer ─────────
 async function sendMovie(conn, from, info, file, quoted) {
     let thumbnail = null;
-    if (info.image) {
-        thumbnail = await makeThumbnail(info.image);
-    }
+    if (info.image) thumbnail = await makeThumbnail(info.image);
+
+    const captionText = `*${file.quality}*\n${cinesubz_footer}`;
 
     const docMsg = await conn.sendMessage(from, {
         document: { url: file.url },
         fileName: `${info.title} (${file.quality}).mp4`.replace(/[\/\\:*?"<>|]/g, ""),
         mimetype: "video/mp4",
         jpegThumbnail: thumbnail || undefined,
-        caption: cinesubz_footer
+        caption: captionText
     }, { quoted });
 
     await react(conn, from, docMsg.key, "✅");
 }
 
-// Command
+// ───────── CineSubz command ─────────
 cmd({
     pattern: "cinesubsk",
-    desc: "CineSubz download with document thumbnail",
+    desc: "CineSubz download with document thumbnail and quality in footer",
     category: "downloader",
     react: "🔍",
     filename: __filename
 }, async (conn, mek, m, { from, q, reply }) => {
     try {
         if (!q) return reply("❗ Example: .cinesubsk Avatar");
+
         await react(conn, from, m.key, "🔍");
 
         // 1️⃣ Search
@@ -115,18 +116,9 @@ cmd({
         if (!info) return reply("❌ Failed to get movie info");
 
         let infoText = `🎬 *${info.title}*\n\n`;
-        if (info.year) infoText += `📅 Year: ${info.year}\n`;
-        if (info.quality) infoText += `📺 Quality: ${info.quality}\n`;
-        if (info.rating) infoText += `⭐ Rating: ${info.rating}\n`;
-        if (info.duration) infoText += `⏱ Duration: ${info.duration}\n`;
-        if (info.country) infoText += `🌍 Country: ${info.country}\n`;
-        if (info.directors) infoText += `🎬 Directors: ${info.directors}\n\n`;
-
-        if (info.downloads && info.downloads.length > 0) {
-            info.downloads.forEach((d, i) => {
-                infoText += `*${i + 1}.* ${d.quality} (${d.size})\n`;
-            });
-        }
+        info.downloads.forEach((d, i) => {
+            infoText += `*${i + 1}.* ${d.quality} (${d.size})\n`;
+        });
 
         const infoMsg = await conn.sendMessage(from, {
             image: { url: info.image },
