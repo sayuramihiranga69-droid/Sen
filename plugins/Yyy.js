@@ -98,7 +98,7 @@ cmd({
         await react(conn, from, m.key, "🔍");
 
         // 1️⃣ Search
-        const searchRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-search?q=${encodeURIComponent(q)}&apikey=YOUR_APIKEY`);
+        const searchRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-search?q=${encodeURIComponent(q)}&apikey=edbcfabbca5a9750`);
         const results = searchRes.data?.data;
         if (!results?.length) return reply("❌ No results found");
 
@@ -113,7 +113,7 @@ cmd({
         const movie = results[index];
 
         // 2️⃣ Info
-        const infoRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-info?url=${encodeURIComponent(movie.url)}&apikey=YOUR_APIKEY`);
+        const infoRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-info?url=${encodeURIComponent(movie.url)}&apikey=edbcfabbca5a9750`);
         const info = infoRes.data?.data;
         if (!info) return reply("❌ Failed to get movie info");
 
@@ -139,22 +139,22 @@ cmd({
 
         // 4️⃣ Get actual downloadable page
         if (chosen.url.includes("pixeldrain")) {
-            const pageRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-download?url=${encodeURIComponent(chosen.url)}&apikey=YOUR_APIKEY`);
+            const pageRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-download?url=${encodeURIComponent(chosen.url)}&apikey=edbcfabbca5a9750`);
             pageLink = pageRes.data?.data?.download;
             if (!pageLink) return reply("❌ Failed to get Pixeldrain page link");
 
-            const realRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/download/pixeldrain?url=${encodeURIComponent(pageLink)}&apikey=YOUR_APIKEY`);
+            const realRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/download/pixeldrain?url=${encodeURIComponent(pageLink)}&apikey=edbcfabbca5a9750`);
             const realUrl = realRes.data?.data?.download;
             if (!realUrl) return reply("❌ Failed to get real download URL");
 
             await sendDocWithProgress(conn, from, info, realUrl, chosen.quality, dlMsg);
 
         } else if (chosen.url.includes("usersdrive")) {
-            const pageRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-download?url=${encodeURIComponent(chosen.url)}&apikey=YOUR_APIKEY`);
+            const pageRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-download?url=${encodeURIComponent(chosen.url)}&apikey=edbcfabbca5a9750`);
             pageLink = pageRes.data?.data?.download;
             if (!pageLink) return reply("❌ Failed to get UserDrive page link");
 
-            const realRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/download/userdrive?url=${encodeURIComponent(pageLink)}&apikey=YOUR_APIKEY`);
+            const realRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/download/userdrive?url=${encodeURIComponent(pageLink)}&apikey=edbcfabbca5a9750`);
             const realUrl = realRes.data?.data?.download;
             if (!realUrl) return reply("❌ Failed to get real download URL");
 
