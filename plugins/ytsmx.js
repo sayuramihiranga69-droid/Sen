@@ -3,12 +3,10 @@ const axios = require('axios');
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GLOBAL STORAGE FOR LAST SEARCH
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 global.lastCineSearch = {};
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 1️⃣ SEARCH COMMAND
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 cmd({
     pattern: "cinesearch",
     alias: ["moviesearch", "csearch"],
@@ -32,25 +30,14 @@ cmd({
         // Save last search for number reply
         global.lastCineSearch[from] = data.data.slice(0, 10);
 
-        // Prepare sections for list message
-        const sections = [{
-            title: "_Search Results_",
-            rows: global.lastCineSearch[from].map((item, index) => ({
-                title: `${index + 1}. ${item.title}`,
-                description: `${item.type || ''} | ${item.quality || ''} | ⭐ ${item.rating || 'N/A'}`,
-                rowId: prefix + 'cinenum ' + (index + 1)
-            }))
-        }];
+        // Prepare text list
+        let text = `🎬 *CineSubz Search Results for:* ${q}\n\n`;
+        global.lastCineSearch[from].forEach((item, index) => {
+            text += `*${index + 1}. ${item.title}*\n📁 ${item.type || ''} | 📺 ${item.quality || ''} | ⭐ ${item.rating || 'N/A'}\n\n`;
+        });
+        text += `📌 Reply with a number (1-${global.lastCineSearch[from].length}) to get details.`;
 
-        const listMessage = {
-            text: `🎬 CineSubz Search Results for: *${q}*\n\n📌 Reply with a number to get details.`,
-            footer: 'CineSubz Downloader',
-            title: 'Select a Number',
-            buttonText: 'Select Number',
-            sections
-        };
-
-        await conn.sendMessage(from, listMessage, { quoted: mek });
+        await conn.sendMessage(from, { text }, { quoted: mek });
 
     } catch (e) {
         console.error("Search error:", e);
@@ -60,7 +47,6 @@ cmd({
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 2️⃣ NUMBER REPLY HANDLER
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 cmd({
     pattern: "cinenum",
     desc: "Get CineSubz details by number",
@@ -76,7 +62,7 @@ cmd({
         const item = global.lastCineSearch[from][num - 1];
         if (!item) return reply("❌ Could not find the selected movie.");
 
-        // Show details using cinedetails API
+        // Fetch details
         const apiUrl = `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-info?url=${encodeURIComponent(item.link)}&apikey=deb4e2d4982c6bc2`;
         const { data } = await axios.get(apiUrl);
 
@@ -114,7 +100,6 @@ cmd({
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 3️⃣ DOWNLOAD LINKS COMMAND
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 cmd({
     pattern: "cinedownload",
     alias: ["cinedl", "cdl"],
