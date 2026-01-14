@@ -55,7 +55,7 @@ async function makeThumbnail(url) {
 
 // ───────── PIRATE COMMAND ─────────
 cmd({
-    pattern: "pirate",
+    pattern: "pirate2",
     desc: "Pirate.lk search + Mega auto download",
     category: "downloader",
     react: "🎬",
