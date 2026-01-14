@@ -3,10 +3,9 @@ const axios = require('axios');
 
 const cinesubz_footer = "✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌𝐄☢️☘";
 
-// Helper function to send Pixeldrain file as WhatsApp document with thumbnail
+// Helper function to send Pixeldrain file as WhatsApp document
 async function sendPixeldrainFile(conn, from, url, quotedMsg, fileName) {
     try {
-        // Fetch thumbnail from catbox
         const thumbUrl = "https://files.catbox.moe/d0v6fe.png";
         const thumbRes = await axios.get(thumbUrl, { responseType: 'arraybuffer' });
         const thumbBuffer = Buffer.from(thumbRes.data, 'binary');
@@ -18,11 +17,10 @@ async function sendPixeldrainFile(conn, from, url, quotedMsg, fileName) {
                 fileName: fileName,
                 mimetype: "video/mp4",
                 caption: cinesubz_footer,
-                jpegThumbnail: thumbBuffer // ← Thumbnail added here
+                jpegThumbnail: thumbBuffer
             },
             { quoted: quotedMsg }
         );
-
         await conn.sendMessage(from, { react: { text: "✅", key: quotedMsg.key } });
     } catch (e) {
         console.error("Failed to send file:", e);
@@ -30,12 +28,9 @@ async function sendPixeldrainFile(conn, from, url, quotedMsg, fileName) {
     }
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// CineSubz Search + Info + Pixeldrain send (single file) with reactions
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 cmd({
     pattern: "cinesubsk",
-    desc: "Search CineSubz, get info, and send Pixeldrain file (single) with thumbnail and reaction",
+    desc: "Search CineSubz, get info, and send Pixeldrain file (single) with thumbnail",
     category: "downloader",
     react: "🔍",
     filename: __filename
@@ -45,7 +40,6 @@ cmd({
 
         await conn.sendMessage(from, { react: { text: "🔍", key: m.key } });
 
-        // 1️⃣ Search API
         const searchUrl = `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-search?q=${encodeURIComponent(q)}&apikey=deb4e2d4982c6bc2`;
         const { data } = await axios.get(searchUrl);
         if (!data.status || !data.data || data.data.length === 0) return reply("❌ No results found.");
@@ -66,33 +60,26 @@ cmd({
         );
         const listMsgId = listMsg.key.id;
 
-        // 2️⃣ Wait for reply to select movie
-        conn.ev.on("messages.upsert", async (update) => {
+        // One-time listener for movie selection
+        conn.ev.once("messages.upsert", async (update) => {
             const msg = update?.messages?.[0];
             if (!msg?.message) return;
 
             const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
-            const isReplyToList = msg?.message?.extendedTextMessage?.contextInfo?.stanzaId === listMsgId;
-            if (!isReplyToList) return;
-
             const index = parseInt(text.trim()) - 1;
             if (isNaN(index) || index < 0 || index >= data.data.length) {
                 await conn.sendMessage(from, { react: { text: "❌", key: msg.key } });
-                return reply("❌ Invalid number. Reply with a valid number from the list.", msg);
+                return reply("❌ Invalid number. Reply with a valid number.", msg);
             }
 
+            const chosen = data.data[index];
             await conn.sendMessage(from, { react: { text: "🎬", key: msg.key } });
 
-            const chosen = data.data[index];
-
-            // 3️⃣ Fetch movie details
+            // Fetch movie details
             const detailsUrl = `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-info?url=${encodeURIComponent(chosen.link)}&apikey=deb4e2d4982c6bc2`;
             const detailsRes = await axios.get(detailsUrl);
             const info = detailsRes.data?.data;
-            if (!info) {
-                await conn.sendMessage(from, { react: { text: "❌", key: msg.key } });
-                return reply("❌ Failed to fetch movie details.", msg);
-            }
+            if (!info) return reply("❌ Failed to fetch movie details.", msg);
 
             let msgText = `🎬 *${info.title}*\n\n`;
             if (info.year) msgText += `📅 Year: ${info.year}\n`;
@@ -119,15 +106,12 @@ cmd({
             );
             const detailsMsgId = detailsMsg.key.id;
 
-            // 4️⃣ Wait for download reply
-            conn.ev.on("messages.upsert", async (dlUpdate) => {
+            // One-time listener for download selection
+            conn.ev.once("messages.upsert", async (dlUpdate) => {
                 const dlMsg = dlUpdate?.messages?.[0];
                 if (!dlMsg?.message) return;
 
                 const dlText = dlMsg.message?.conversation || dlMsg.message?.extendedTextMessage?.text;
-                const isReplyToDetails = dlMsg?.message?.extendedTextMessage?.contextInfo?.stanzaId === detailsMsgId;
-                if (!isReplyToDetails) return;
-
                 const dlIndex = parseInt(dlText.trim()) - 1;
                 if (isNaN(dlIndex) || dlIndex < 0 || dlIndex >= info.downloads.length) {
                     await conn.sendMessage(from, { react: { text: "❌", key: dlMsg.key } });
@@ -136,22 +120,19 @@ cmd({
 
                 const dlChosen = info.downloads[dlIndex];
 
-                // 5️⃣ Fetch Pixeldrain only
+                // Fetch Pixeldrain
                 const dlRes = await axios.get(
                     `https://api-dark-shan-yt.koyeb.app/movie/cinesubz-download?url=${encodeURIComponent(dlChosen.link)}&apikey=deb4e2d4982c6bc2`
                 );
 
                 const dlData = dlRes.data?.data;
-                if (!dlData || !dlData.download || dlData.download.length === 0) {
-                    await conn.sendMessage(from, { react: { text: "❌", key: dlMsg.key } });
+                if (!dlData || !dlData.download || dlData.download.length === 0)
                     return reply("❌ Failed to fetch Pixeldrain links.", dlMsg);
-                }
 
-                // Send only FIRST PIX link
+                // Send first PIX file
                 const file = dlData.download.find(f => f.name.toUpperCase().includes("PIX"));
                 if (file) {
-                    const fileName = `${info.title} (${info.year}) ${file.quality} [CineSubz].mp4`
-                        .replace(/[\/\\:*?"<>|]/g, "");
+                    const fileName = `${info.title} (${info.year}) ${file.quality} [CineSubz].mp4`.replace(/[\/\\:*?"<>|]/g, "");
                     await sendPixeldrainFile(conn, from, file.url, dlMsg, fileName);
                 }
             });
