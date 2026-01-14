@@ -60,7 +60,7 @@ async function sendDocFile(conn, from, info, filePath, quality, quoted) {
 
 // ───────── Command ─────────
 cmd({
-    pattern: "sinhalasubt",
+    pattern: "sinhalasub1",
     desc: "Search & download Sinhala subtitles movie with full 4-step endpoints",
     category: "downloader",
     react: "🔍",
