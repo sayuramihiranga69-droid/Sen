@@ -10,7 +10,7 @@ async function sendPixeldrainFile(conn, from, url, quotedMsg, fileName, thumbUrl
     try {
         let thumbnailBuffer = null;
 
-        // thumbnail URL එකක් තියෙනවා නම් fetch කරන්න
+        // If thumbnail URL provided, fetch image buffer
         if (thumbUrl) {
             const response = await axios.get(thumbUrl, { responseType: "arraybuffer" });
             thumbnailBuffer = Buffer.from(response.data, "binary");
@@ -152,18 +152,18 @@ cmd({
                     return reply("❌ Failed to fetch Pixeldrain links.", dlMsg);
                 }
 
-                // Send only FIRST PIX link WITH thumbnail
+                // Send only FIRST PIX link WITH movie poster as thumbnail
                 const file = dlData.download.find(f => f.name.toUpperCase().includes("PIX"));
                 if (file) {
                     const fileName = `${info.title} (${info.year}) ${file.quality} [CineSubz].mp4`
                         .replace(/[\/\\:*?"<>|]/g, "");
                     await sendPixeldrainFile(
-                        conn, 
-                        from, 
-                        file.url, 
-                        dlMsg, 
-                        fileName, 
-                        "https://files.catbox.moe/d0v6fe.png" // thumbnail image
+                        conn,
+                        from,
+                        file.url,
+                        dlMsg,
+                        fileName,
+                        info.image // movie poster thumbnail
                     );
                 }
             });
