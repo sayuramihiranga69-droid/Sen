@@ -1,190 +1,150 @@
-const config = require('../config');
 const { cmd } = require('../command');
 const axios = require('axios');
-const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const sharp = require('sharp');
 
-// ================= GLOBAL =================
-let primeUsers = [];
-global.lastSearch = global.lastSearch || {};
-let isUploadingg = false;
+const footer = "✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌☢️☘";
 
-// ================= LOAD PRIME USERS =================
-async function loadPrimeUsers() {
-  try {
-    const res = await axios.get('https://raw.githubusercontent.com/sayuramihiranga69-droid/Data/refs/heads/main/prime_users.json');
-    const raw = res.data || {};
-
-    if (raw.numbers) {
-      if (typeof raw.numbers === "string") {
-        primeUsers = raw.numbers.split(',').map(x => x.trim());
-      } else if (Array.isArray(raw.numbers)) {
-        primeUsers = raw.numbers.map(x => x.toString().trim());
-      }
-    }
-
-    console.log('[✔️] Prime users loaded:', primeUsers);
-  } catch (err) {
-    console.error('[❌] Failed loading prime users:', err);
-  }
-}
-loadPrimeUsers();
-
-// ================= CHECK PREMIUM =================
-function isPremiumUser(userId) {
-  return primeUsers.includes(userId);
+// ───────── React helper ─────────
+async function react(conn, jid, key, emoji) {
+    try { await conn.sendMessage(jid, { react: { text: emoji, key } }); } catch {}
 }
 
-// ================= SINHALA SUB SEARCH =================
-cmd({
-    pattern: "sinhalasub",
-    react: '🔎',
-    category: "movie",
-    alias: ["sinsub"],
-    desc: "Search movies on sinhalasub.lk",
-    use: ".sinhalasub <movie name>",
-    filename: __filename
-}, async (conn, m, mek, { from, q, isPre, isMe, reply }) => {
+// ───────── Create thumbnail ─────────
+async function makeThumbnail(url) {
     try {
-        if (!q) return reply('*Please enter a movie name! 🎬*');
+        const img = await axios.get(url, { responseType: "arraybuffer" });
+        return await sharp(img.data).resize(300).jpeg({ quality: 65 }).toBuffer();
+    } catch (e) {
+        console.log("Thumbnail error:", e.message);
+        return null;
+    }
+}
 
-        // PREMIUM CHECK
-        if (!isPremiumUser(m.sender) && !isMe && !isPre) {
-            await conn.sendMessage(from, { react: { text: '❌', key: mek.key } });
-            return await conn.sendMessage(from, {
-                text: "*`You are not a premium user⚠️`*\n\n" +
-                      "*Send a message to buy Lifetime premium 📤.*\n\n" +
-                      "_Price : 100 LKR_\n\n" +
-                      "*Contact: 94754871798*"
-            }, { quoted: mek });
-        }
+// ───────── Wait for reply ─────────
+function waitForReply(conn, from, replyToId, timeout = 120000) {
+    return new Promise((resolve, reject) => {
+        const handler = (update) => {
+            const msg = update.messages?.[0];
+            if (!msg?.message) return;
+            const ctx = msg.message?.extendedTextMessage?.contextInfo;
+            const text = msg.message.conversation || msg.message?.extendedTextMessage?.text;
+            if (msg.key.remoteJid === from && ctx?.stanzaId === replyToId) {
+                conn.ev.off("messages.upsert", handler);
+                resolve({ msg, text });
+            }
+        };
+        conn.ev.on("messages.upsert", handler);
+        setTimeout(() => {
+            conn.ev.off("messages.upsert", handler);
+            reject(new Error("Reply timeout"));
+        }, timeout);
+    });
+}
 
-        // FETCH MOVIE RESULTS
-        const { data: apiRes } = await axios.get(`https://visper-md-ap-is.vercel.app/movie/sinhalasub/search?q=${encodeURIComponent(q)}`);
-        let results = [];
-        if (Array.isArray(apiRes)) results = apiRes;
-        else if (Array.isArray(apiRes.result)) results = apiRes.result;
-        else if (Array.isArray(apiRes.results)) results = apiRes.results;
-        else if (Array.isArray(apiRes.data)) results = apiRes.data;
+// ───────── Send WhatsApp document ─────────
+async function sendDocFile(conn, from, info, filePath, quality, quoted) {
+    const thumb = info.image ? await makeThumbnail(info.image) : null;
+    const caption = `🎬 *${info.title}*\n*${quality}*\n${footer}`;
+    const docMsg = await conn.sendMessage(from, {
+        document: { url: filePath },
+        fileName: `${info.title} (${quality}).mp4`.replace(/[\/\\:*?"<>|]/g,""),
+        mimetype: "video/mp4",
+        jpegThumbnail: thumb || undefined,
+        caption
+    }, { quoted });
+    await react(conn, from, docMsg.key, "✅");
+}
 
-        if (!results.length) return reply('*No results found ❌*');
+// ───────── Command ─────────
+cmd({
+    pattern: "sinhalasub1",
+    desc: "Search & download Sinhala subtitles movie with full 4-step endpoints",
+    category: "downloader",
+    react: "🔍",
+    filename: __filename
+}, async (conn, mek, m, { from, q, reply }) => {
+    try {
+        if (!q) return reply("❗ Example: .sinhalasubt New");
+        await react(conn, from, m.key, "🔍");
 
-        // PREPARE TEXT REPLY
-        let text = `_*SINHALASUB MOVIE SEARCH RESULTS 🎬*_ \n\n*🔎 Input:* ${q}\n\n`;
-        results.forEach((v, i) => {
-            const title = (v.Title || v.title || "Unknown Title").replace(/Sinhala Subtitles\s*\|?\s*සිංහල උපසිරසි.*/gi,"").trim();
-            const year = v.Year || '';
-            const quality = v.Quality || '';
-            const link = v.Link || v.link || '';
-            text += `*${i+1}. ${title} (${year})*\nQuality: ${quality}\nLink: ${link}\n\n`;
+        // 1️⃣ Search → /sinhalasub-search
+        console.log("🔎 Searching:", q);
+        const searchRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-search?q=${encodeURIComponent(q)}&apikey=edbcfabbca5a9750`);
+        const results = searchRes.data?.data;
+        if (!results?.length) return reply("❌ No results found");
+        console.log("📄 Search results:", results.map(r => r.title));
+
+        let listText = "🎬 *Search Results*\n\n";
+        results.slice(0, 10).forEach((v, i) => { listText += `*${i+1}.* ${v.title}\n`; });
+        const listMsg = await conn.sendMessage(from, { text: listText + `\nReply number\n\n${footer}` }, { quoted: mek });
+
+        // 2️⃣ User selects movie
+        const { msg: movieMsg, text: movieText } = await waitForReply(conn, from, listMsg.key.id);
+        const index = parseInt(movieText) - 1;
+        if (isNaN(index) || !results[index]) return reply("❌ Invalid number");
+        await react(conn, from, movieMsg.key, "🎬");
+        const movie = results[index];
+        console.log("🎬 Selected movie:", movie.title, movie.url);
+
+        // 3️⃣ Info → /sinhalasub-info
+        console.log("📥 Fetching movie info and Pixeldrain page link...");
+        const infoRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-info?url=${encodeURIComponent(movie.url)}&apikey=edbcfabbca5a9750`);
+        const info = infoRes.data?.data;
+        if (!info) return reply("❌ Failed to get movie info");
+
+        const pix = info.downloads?.pixeldrain;
+        if (!pix || !pix.length) return reply("❌ No Pixeldrain links found");
+        console.log("📌 Available Pixeldrain links:", pix.map(d => ({ quality: d.quality, url: d.url })));
+
+        let qualityList = "";
+        pix.forEach((d,i)=>{ qualityList += `*${i+1}.* ${d.quality} (${d.size})\n`; });
+        const qualityMsg = await conn.sendMessage(from, {
+            image: { url: info.image },
+            caption: `🎬 *${info.title}*\n\nAvailable Downloads:\n${qualityList}\nReply download number\n${footer}`
+        }, { quoted: movieMsg });
+
+        // 4️⃣ User selects quality
+        const { msg: dlMsg, text: dlText } = await waitForReply(conn, from, qualityMsg.key.id);
+        const dIndex = parseInt(dlText) - 1;
+        if (isNaN(dIndex) || !pix[dIndex]) return reply("❌ Invalid download number");
+        await react(conn, from, dlMsg.key, "⬇️");
+        const chosen = pix[dIndex];
+        console.log("⬇️ Selected Pixeldrain page link:", chosen.url);
+
+        // 5️⃣ Pixeldrain page → /sinhalasub-download
+        console.log("🌐 Fetching Pixeldrain download page link...");
+        const pageRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/movie/sinhalasub-download?url=${encodeURIComponent(chosen.url)}&apikey=edbcfabbca5a9750`);
+        const pageLink = pageRes.data?.data?.download;
+        if (!pageLink) return reply("❌ Failed to get Pixeldrain page link");
+        console.log("🔗 Pixeldrain page link:", pageLink);
+
+        // 6️⃣ Real download → /download/pixeldrain
+        console.log("🌐 Fetching real direct download URL...");
+        const dlRes = await axios.get(`https://api-dark-shan-yt.koyeb.app/download/pixeldrain?url=${encodeURIComponent(pageLink)}&apikey=edbcfabbca5a9750`);
+        const realUrl = dlRes.data?.data?.download;
+        if (!realUrl) return reply("❌ Failed to get real download URL");
+        console.log("✅ Real download URL:", realUrl);
+
+        // 7️⃣ Local download & send WhatsApp
+        console.log("📤 Downloading & sending file...");
+        const tempPath = path.join(os.tmpdir(), `${movie.title} (${chosen.quality}).mp4`);
+        const writer = fs.createWriteStream(tempPath);
+        const fileRes = await axios.get(realUrl, { responseType: 'stream' });
+        fileRes.data.pipe(writer);
+        await new Promise((resolve, reject) => {
+            writer.on('finish', resolve);
+            writer.on('error', reject);
         });
 
-        await reply(text);
+        await sendDocFile(conn, from, info, tempPath, chosen.quality, dlMsg);
+        fs.unlinkSync(tempPath);
+        console.log("✅ Done!");
 
     } catch (e) {
-        console.error("🔥 SinhalaSub Error:", e);
-        reply('🚫 *Error Occurred !!*\n\n' + e.message);
-    }
-});
-
-// ================= SININFO MOVIE DETAILS =================
-cmd({
-    pattern: "sininfo",
-    alias: ["mdv"],
-    react: "🎥",
-    desc: "Movie details from sinhalasub.lk",
-    filename: __filename
-}, async (conn, mek, m, { from, q, reply }) => {
-    try {
-        if (!q) return reply('🚩 *Please give me a valid movie URL!*');
-
-        const { data } = await axios.get(`https://visper-md-ap-is.vercel.app/movie/sinhalasub/info?q=${encodeURIComponent(q)}`);
-        const sadas = data.result;
-        if (!sadas || Object.keys(sadas).length === 0) return reply('*🚫 No details found for this movie!*');
-
-        let msg = `*🌾 Title:* *_${sadas.title || 'N/A'}_*\n`;
-        msg += `*📅 Released:* _${sadas.date || 'N/A'}_\n`;
-        msg += `*🌎 Country:* _${sadas.country || 'N/A'}_\n`;
-        msg += `*💃 Rating:* _${sadas.rating || 'N/A'}_\n`;
-        msg += `*⏰ Runtime:* _${sadas.duration || 'N/A'}_\n`;
-        msg += `*🕵️ Subtitle By:* _${sadas.author || 'N/A'}_\n\n`;
-
-        if (sadas.downloadLinks && sadas.downloadLinks.length > 0) {
-            msg += "*Available Download Links:*\n";
-            sadas.downloadLinks.forEach((v, i) => {
-                msg += `${i+1}. ${v.size || 'N/A'} - ${v.quality || 'Unknown Quality'}\nLink: ${v.link}\n\n`;
-            });
-        }
-
-        await reply(msg);
-
-    } catch (e) {
-        console.error(e);
-        reply('🚫 *Error Occurred !!*\n\n' + e.message);
-    }
-});
-
-// ================= SEND MOVIE FILE =================
-cmd({
-    pattern: "sindl",
-    react: "⬇️",
-    dontAddCommandList: true,
-    filename: __filename
-}, async (conn, mek, m, { from, q, reply }) => {
-    if (isUploadingg) return reply('*A movie is already being uploaded. Please wait ⏳*');
-
-    try {
-        const [pix, imglink, title] = q.split("±");
-        if (!pix || !imglink || !title) return reply("⚠️ Invalid format. Use:\n`sindl link±img±title`");
-
-        const da = pix.split("https://pixeldrain.com/u/")[1];
-        if (!da) return reply("⚠️ Couldn’t extract Pixeldrain file ID.");
-
-        const fileUrl = `https://pixeldrain.com/api/file/${da}`;
-        isUploadingg = true;
-        conn.sendMessage(from, { text: '*Uploading your movie.. ⬆️*', quoted: mek });
-
-        await conn.sendMessage(from, {
-            document: { url: fileUrl },
-            mimetype: "video/mp4",
-            fileName: `🎬 ${title}.mp4`,
-            caption: `🎬 ${title}\n\n${config.NAME}\n\n${config.FOOTER}`
-        });
-
-        conn.sendMessage(from, { text: '*Movie sent successfully ✔*', quoted: mek });
-
-    } catch (e) {
-        reply('🚫 *Error Occurred !!*\n\n' + e.message);
-        console.error("sindl error:", e);
-    } finally {
-        isUploadingg = false;
-    }
-});
-
-// ================= MOVIE DETAILS SHORT =================
-cmd({
-    pattern: "daqt",
-    react: "🎥",
-    alias: ["mdv"],
-    filename: __filename
-}, async (conn, mek, m, { from, q, reply }) => {
-    try {
-        if (!q) return reply('🚩 *Please give me a valid movie URL!*');
-
-        const { data } = await axios.get(`https://visper-md-ap-is.vercel.app/movie/sinhalasub/info?q=${encodeURIComponent(q)}`);
-        const sadas = data.result;
-        if (!sadas || Object.keys(sadas).length === 0) return reply('*🚫 No details found for this movie!*');
-
-        let msg = `*🍿 Title:* *_${sadas.title || 'N/A'}_*\n`;
-        msg += `*📅 Released:* _${sadas.date || 'N/A'}_\n`;
-        msg += `*🌎 Country:* _${sadas.country || 'N/A'}_\n`;
-        msg += `*💃 Rating:* _${sadas.rating || 'N/A'}_\n`;
-        msg += `*⏰ Runtime:* _${sadas.duration || 'N/A'}_\n`;
-        msg += `*🕵️ Subtitle By:* _${sadas.author || 'N/A'}_`;
-
-        await reply(msg);
-
-    } catch (error) {
-        console.error('Error fetching movie:', error);
-        reply('🚫 *Error Occurred !!*\n\n' + error.message);
+        console.error("SINHALASUB ERROR:", e);
+        reply("⚠️ Error:\n" + e.message);
     }
 });
