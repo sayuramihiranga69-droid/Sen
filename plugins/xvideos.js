@@ -1,105 +1,114 @@
-const axios = require("axios");
-const fileType = require("file-type");
 const { cmd } = require("../command");
+const axios = require("axios");
+
+const XN_FOOTER = "✫☘ 𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃 𝐗-𝐒𝐄𝐀𝐑𝐂𝐇 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐑 ☢️☘";
+const SRIHUB_KEY = "dew_YyT0KDc2boHDasFlmZCqDcPoeDHReD20aYmEsm1G";
+const SEARCH_API = "https://api.srihub.store/nsfw/xnxxsearch";
+const DOWNLOAD_API = "https://api.srihub.store/nsfw/xnxxdl";
+
+// ───────── Ultra Smart Waiter ─────────
+function waitForReply(conn, from, sender, targetId) {
+    return new Promise((resolve) => {
+        const handler = (update) => {
+            const msg = update.messages?.[0];
+            if (!msg?.message) return;
+
+            const text = msg.message.conversation || msg.message?.extendedTextMessage?.text || "";
+            const context = msg.message?.extendedTextMessage?.contextInfo;
+            const msgSender = msg.key.participant || msg.key.remoteJid;
+            
+            const isTargetReply = context?.stanzaId === targetId;
+            const isCorrectUser = msgSender.includes(sender.split('@')[0]) || msgSender.includes("@lid");
+
+            if (msg.key.remoteJid === from && isCorrectUser && isTargetReply && !isNaN(text)) {
+                conn.ev.off("messages.upsert", handler);
+                resolve({ msg, text: text.trim() });
+            }
+        };
+        conn.ev.on("messages.upsert", handler);
+        setTimeout(() => { conn.ev.off("messages.upsert", handler); }, 300000); // 5 Minutes
+    });
+}
 
 cmd({
-  pattern: "xs",
-  react: "🔞",
-  desc: "Search adult videos from xnxx",
-  category: "adult",
-  use: ".xsearch <query>",
-  filename: __filename
-}, async (conn, mek, m, { args, reply }) => {
-  const query = args.join(" ");
-  if (!query) return reply("*⚡ Please provide a search query..!*\nExample: *.xsearch big boobs*");
-
-  await reply("> 🔍 ＳᴇＡʀＣʜＩɴＧ ＶɪＤᴇＯꜱ...");
-
-  try {
-    const api = `https://api-aswin-sparky.koyeb.app/api/search/xnxx?search=${encodeURIComponent(query)}`;
-    const { data } = await axios.get(api);
-
-    if (!data?.status || !data.result?.status || !Array.isArray(data.result.result)) {
-      return reply("❌ Failed to fetch search results!");
-    }
-
-    const results = data.result.result;
-    if (results.length === 0) {
-      return reply("❌ No videos found for your query!");
-    }
-
-    for (let i = 0; i < Math.min(results.length, 10); i++) {
-      const v = results[i];
-      const caption = `*${i + 1}.* ${v.title}\n${v.info.replace(/\n/g, " ").trim()}\n🔗 ${v.link}\n_➡️ Use: *.xvideo <link>* to download_\n\n_Sent by ＳAYURA ＭＤ_`;
-
-      // Only send image if thumbnail exists
-      if (v.thumb && v.thumb.startsWith("http")) {
-        await conn.sendMessage(mek.chat, {
-          image: { url: v.thumb },
-          caption: caption
-        }, { quoted: mek });
-      } else {
-        await reply(caption); // fallback to text-only
-      }
-    }
-
-  } catch (e) {
-    console.log("XNXX Search Error:", e);
-    reply("❌ Error occurred while searching videos.");
-  }
-});
-
-cmd({
-  pattern: "xdl",
-  react: "⬇️",
-  desc: "Download adult video from xnxx",
-  category: "adult",
-  use: ".xvideo <link>",
-  filename: __filename
-}, async (conn, mek, m, { args, reply }) => {
-  const url = args[0];
-  if (!url) return reply("*⚡ Please provide a valid xnxx URL...!*\nExample: *.xvideo https://www.xvideos.com/videoXXXXX/title*");
-
-  await reply("_*⏳ Ｆ𝙴𝚃𝙲𝙷𝙸𝙽𝙶 Ｖ𝙸𝙳𝙴𝙾 Ｄ𝙴𝚃𝙰𝙸𝙻𝚂....*_");
-
-  try {
-    const api = `https://api-aswin-sparky.koyeb.app/api/downloader/xnxx?url=${encodeURIComponent(url)}`;
-    const { data } = await axios.get(api);
-
-    if (!data?.status || !data.data?.files) {
-      return reply("❌ Failed to fetch video. Try another link!");
-    }
-
-    const videoData = data.data;
-    const videoUrl = videoData.files.high || videoData.files.low;
-    if (!videoUrl) return reply("❌ No downloadable video found!");
-
-    const title = videoData.title || "xnxx_video";
-    const duration = videoData.duration || "Unknown";
-
-    let caption = `🔞 _*${title}*_\n⏱ 𝐃𝐮𝐫𝐚𝐭𝐢𝐨𝐧: ${duration} 𝐒𝐞𝐜\n_Sent by ＳAYURA ＭＤ_`;
-
-    // File size check
-    let fileSize = 0;
+    pattern: "xnxx2",
+    alias: ["xsearch", "xn"],
+    desc: "Search and download xnxx videos",
+    category: "nsfw",
+    react: "🔞",
+    filename: __filename,
+}, async (conn, mek, m, { from, q, reply, sender }) => {
     try {
-      const head = await axios.head(videoUrl);
-      fileSize = parseInt(head.headers["content-length"] || "0");
-    } catch { }
+        if (!q) return reply("❗ කරුණාකර සෙවිය යුතු නමක් (Query) ඇතුළත් කරන්න.");
 
-    const maxSize = 64 * 1024 * 1024; // 64MB WhatsApp limit
-    if (fileSize && fileSize > maxSize) {
-      return reply(`⚠️ File too large for WhatsApp!\nDownload manually:\n${videoUrl}`);
+        // 1. සෙවුම් ප්‍රතිඵල ලබා ගැනීම
+        const searchRes = await axios.get(`${SEARCH_API}?q=${encodeURIComponent(q)}&apikey=${SRIHUB_KEY}`);
+        const results = searchRes.data?.results?.result;
+
+        if (!results || results.length === 0) return reply("❌ කිසිවක් හමු නොවීය.");
+
+        let listText = "🔞 *𝐗𝐍𝐗𝐗 𝐒𝐄𝐀𝐑𝐂𝐇 𝐑𝐄𝐒𝐔𝐋𝐓𝐒*\n\n";
+        results.slice(0, 15).forEach((v, i) => {
+            listText += `*${i + 1}.* ${v.title}\n   _⏱️ ${v.duration} | 👁️ ${v.views}_\n\n`;
+        });
+
+        const sentSearch = await conn.sendMessage(from, { 
+            text: listText + `කරුණාකර ඔබට අවශ්‍ය අංකය Reply කරන්න.` 
+        }, { quoted: m });
+
+        // --- ස්වාධීන පාලනය (Search Flow) ---
+        const startFlow = async () => {
+            const selection = await waitForReply(conn, from, sender, sentSearch.key.id);
+            if (!selection) return;
+
+            const idx = parseInt(selection.text) - 1;
+            const selectedVideo = results[idx];
+            if (!selectedVideo) return reply("❌ වැරදි අංකයකි.");
+
+            await conn.sendMessage(from, { react: { text: "⏳", key: selection.msg.key } });
+
+            try {
+                // 2. වීඩියෝවේ බාගත කිරීමේ ලින්ක් ලබා ගැනීම
+                const dlRes = await axios.get(`${DOWNLOAD_API}?url=${encodeURIComponent(selectedVideo.link)}&apikey=${SRIHUB_KEY}`);
+                const data = dlRes.data?.results;
+
+                if (!data) return reply("❌ බාගත කිරීමේ ලින්ක් ලබා ගත නොහැක.");
+
+                let qualityText = `🎥 *${data.title}*\n\n` +
+                                 `*1.* High Quality (MP4)\n` +
+                                 `*2.* Low Quality (3GP)\n\n` +
+                                 `ඔබට අවශ්‍ය ගුණාත්මක භාවයේ (Quality) අංකය Reply කරන්න.`;
+
+                const sentQual = await conn.sendMessage(from, { 
+                    image: { url: data.image }, 
+                    caption: qualityText 
+                }, { quoted: selection.msg });
+
+                const qSel = await waitForReply(conn, from, sender, sentQual.key.id);
+                if (!qSel) return;
+
+                const videoUrl = qSel.text === "1" ? data.files.high : data.files.low;
+                
+                await conn.sendMessage(from, { react: { text: "📥", key: qSel.msg.key } });
+
+                // 3. වීඩියෝව Document එකක් ලෙස යැවීම
+                await conn.sendMessage(from, {
+                    document: { url: videoUrl },
+                    fileName: `${data.title}.mp4`,
+                    mimetype: "video/mp4",
+                    caption: `✅ *Download Complete*\n🎬 *${data.title}*\n\n${XN_FOOTER}`
+                }, { quoted: qSel.msg });
+
+            } catch (err) {
+                console.error(err);
+                reply("❌ බාගත කිරීමේදී දෝෂයක් සිදු විය.");
+            }
+        };
+
+        startFlow();
+
+    } catch (e) {
+        console.log(e);
+        reply("❌ පද්ධතියේ දෝෂයක් පවතී.");
     }
-
-    await conn.sendMessage(mek.chat, {
-      document: { url: videoUrl },
-      mimetype: "video/mp4",
-      fileName: `${title.replace(/[^a-zA-Z0-9]/g, "_").slice(0, 32)}.mp4`,
-      caption: caption
-    }, { quoted: mek });
-
-  } catch (e) {
-    console.log("XNXX Download Error:", e);
-    reply("❌ Error occurred while downloading video.");
-  }
 });
