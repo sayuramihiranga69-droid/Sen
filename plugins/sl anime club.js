@@ -11,20 +11,21 @@ async function react(conn, jid, key, emoji) {
     try { await conn.sendMessage(jid, { react: { text: emoji, key } }); } catch {}
 }
 
-// ───────── High-Speed Multi-User Wait Helper ─────────
-function waitForReply(conn, from, sender, replyToId, timeout = 120000) {
+// ───────── Ultra-Fast Wait Helper (No Stanza Check) ─────────
+function waitForReply(conn, from, sender, timeout = 60000) {
     return new Promise((resolve, reject) => {
         const handler = (update) => {
             const msg = update.messages?.[0];
             if (!msg?.message) return;
 
-            const context = msg.message?.extendedTextMessage?.contextInfo;
             const text = msg.message.conversation || msg.message?.extendedTextMessage?.text || "";
             const msgSender = msg.key.participant || msg.key.remoteJid;
-            const isCorrectUser = msgSender.split('@')[0] === sender.split('@')[0];
+            
+            // 🔒 මෙන්න මෙතනයි වෙනස - Stanza ID බලන්නේ නැතුව මේ යූසර්ම එවපු අංකයක්ද කියලා විතරක් බලනවා
+            const isFromUser = msgSender.split('@')[0] === sender.split('@')[0];
 
-            if (msg.key.remoteJid === from && isCorrectUser && text.length > 0) {
-                console.log(`[REPLY RECEIVED] User: ${sender}, Text: ${text}`); // Console log for reply
+            if (msg.key.remoteJid === from && isFromUser && text.length > 0 && !isNaN(text)) {
+                console.log(`[CONSOLE] Correct Number Received: ${text} from ${sender}`);
                 conn.ev.off("messages.upsert", handler);
                 resolve({ msg, text: text.trim() });
             }
@@ -41,14 +42,14 @@ function waitForReply(conn, from, sender, replyToId, timeout = 120000) {
 cmd({
     pattern: "anime",
     alias: ["ac2", "movie"],
-    desc: "Anime Downloader with Console Logs",
+    desc: "Fast Anime Downloader",
     category: "downloader",
     react: "⛩️",
     filename: __filename,
 }, async (conn, mek, m, { from, q, reply, sender }) => {
     try {
         if (!q) return reply("❗ කරුණාකර නමක් සඳහන් කරන්න.");
-        console.log(`[SEARCH] Query: ${q} | From: ${sender}`); // Log search
+        console.log(`[CONSOLE] Search started: ${q}`);
         await react(conn, from, m.key, "🔍");
 
         // 1. Search
@@ -58,58 +59,53 @@ cmd({
 
         let listText = "⛩️ *𝐀𝐍𝐈𝐌𝐄𝐂𝐋𝐔𝐁𝟐 𝐒𝐄𝐀𝐑𝐂𝐇*\n\n";
         results.slice(0, 10).forEach((v, i) => { listText += `*${i + 1}.* ${v.title}\n`; });
-        const listMsg = await conn.sendMessage(from, { text: listText + `\nඅංකය Reply කරන්න.\n\n${AC2_FOOTER}` }, { quoted: m });
+        await conn.sendMessage(from, { text: listText + `\nඅංකය Reply කරන්න.\n\n${AC2_FOOTER}` }, { quoted: m });
 
-        // 2. Select Anime
-        const { msg: selMsg, text: selText } = await waitForReply(conn, from, sender, listMsg.key.id);
+        // 2. Selection
+        const { msg: selMsg, text: selText } = await waitForReply(conn, from, sender);
         const index = parseInt(selText) - 1;
         if (isNaN(index) || !results[index]) return reply("❌ වැරදි අංකයක්.");
-        console.log(`[SELECTED] Anime: ${results[index].title}`); // Log selection
         await react(conn, from, selMsg.key, "🎬");
 
-        // 3. Get Details
+        // 3. Details & Force Episode List
         const detailsRes = await axios.get(`${API_BASE}?action=details&url=${encodeURIComponent(results[index].link)}`);
         const details = detailsRes.data?.data;
         let downloadUrl = results[index].link;
 
-        // Force Episode List if available
         if (details.episodes && details.episodes.length > 0) {
-            console.log(`[INFO] Episode list found for ${details.title}`); // Log episode discovery
+            console.log(`[CONSOLE] Episode list displaying for: ${details.title}`);
             let epText = `📺 *${details.title}*\n\n*Select Episode:*`;
             details.episodes.forEach((ep, i) => { epText += `\n*${i + 1}.* Episode ${ep.ep_num}`; });
             
-            const epMsg = await conn.sendMessage(from, { 
+            await conn.sendMessage(from, { 
                 image: { url: details.image }, 
                 caption: epText + `\n\nඑපිසෝඩ් අංකය Reply කරන්න.\n${AC2_FOOTER}`
             }, { quoted: selMsg });
 
-            const { msg: epSelMsg, text: epSelText } = await waitForReply(conn, from, sender, epMsg.key.id);
+            const { msg: epSelMsg, text: epSelText } = await waitForReply(conn, from, sender);
             const epIdx = parseInt(epSelText) - 1;
             downloadUrl = details.episodes[epIdx].link;
-            console.log(`[SELECTED] Episode: ${epIdx + 1}`); // Log episode choice
             await react(conn, from, epSelMsg.key, "📥");
         }
 
-        // 4. Quality selection
+        // 4. Quality
         const dlRes = await axios.get(`${API_BASE}?action=download&url=${encodeURIComponent(downloadUrl)}`);
         const dlLinks = dlRes.data?.download_links;
         
         let qText = `🎬 *Select Quality:*`;
         dlLinks.forEach((dl, i) => { qText += `\n*${i + 1}.* ${dl.quality}`; });
-        const qMsg = await conn.sendMessage(from, { text: qText + `\n\nඅංකය Reply කරන්න.` }, { quoted: m });
+        await conn.sendMessage(from, { text: qText + `\n\nඅංකය Reply කරන්න.` }, { quoted: m });
 
-        const { msg: lastMsg, text: lastText } = await waitForReply(conn, from, sender, qMsg.key.id);
+        const { msg: lastMsg, text: lastText } = await waitForReply(conn, from, sender);
         const chosen = dlLinks[parseInt(lastText) - 1];
-        console.log(`[DOWNLOADING] Quality: ${chosen.quality}`); // Log quality
         await react(conn, from, lastMsg.key, "⏳");
 
         // 5. SriHub Bypass
-        console.log(`[BYPASSING] URL: ${chosen.direct_link}`); // Log bypass start
         const bypassRes = await axios.get(`${SRIHUB_BYPASS_API}?url=${encodeURIComponent(chosen.direct_link)}&apikey=${SRIHUB_KEY}`);
         
         if (bypassRes.data?.success) {
             const realFile = bypassRes.data.result;
-            console.log(`[SUCCESS] File found: ${realFile.fileName} (${realFile.fileSize})`); // Log success
+            console.log(`[CONSOLE] Sending file: ${realFile.fileName}`);
             await conn.sendMessage(from, {
                 document: { url: realFile.downloadUrl },
                 fileName: realFile.fileName,
@@ -118,12 +114,11 @@ cmd({
             }, { quoted: lastMsg });
             await react(conn, from, lastMsg.key, "✅");
         } else {
-            console.log(`[ERROR] SriHub Bypass failed.`); // Log failure
             reply("❌ Real File එක සකස් කිරීම අසාර්ථකයි.");
         }
 
     } catch (e) {
-        console.log(`[FATAL ERROR] ${e.message}`); // Log error
+        console.log(`[CONSOLE ERROR] ${e.message}`);
         reply("⚠️ දෝෂයක්: " + e.message);
     }
 });
