@@ -7,14 +7,37 @@ const DK_HANDLER = "https://dinka-mu.vercel.app/api/handler";
 const SRIHUB_BYPASS = "https://api.srihub.store/download/gdrive";
 const SRIHUB_KEY = "dew_YyT0KDc2boHDasFlmZCqDcPoeDHReD20aYmEsm1G";
 
-// 🔗 Unshortener: කෙටි ලින්ක් වල නියම ලින්ක් එක හොයන්න
-async function unshorten(url) {
+// 🏷️ Original File Name එක සහ Redirected Link එක හොයාගන්නා Function එක
+async function getFileInfo(url) {
     try {
-        const response = await axios.head(url, { maxRedirects: 15, timeout: 5000 });
-        return response.request.res.responseUrl || url;
-    } catch (e) { return url; }
+        const response = await axios.head(url, { 
+            maxRedirects: 15, 
+            timeout: 10000,
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        
+        const finalUrl = response.request.res.responseUrl || url;
+        let fileName = "Gojo-MD-Movie.mp4";
+
+        // Headers වලින් නියම නම බැලීම
+        if (response.headers['content-disposition']) {
+            const disposition = response.headers['content-disposition'];
+            const match = disposition.match(/filename=(?:["']([^"']+)["']|([^;]+))/);
+            if (match) fileName = match[1] || match[2];
+        } else {
+            fileName = new URL(finalUrl).pathname.split('/').pop();
+        }
+        
+        return { 
+            name: decodeURIComponent(fileName).replace(/\+/g, ' '), 
+            url: finalUrl 
+        };
+    } catch (e) {
+        return { name: "Movie.mp4", url: url };
+    }
 }
 
+// ⏳ Reply එක එනකම් බලා ඉන්නා Function එක
 function waitForReply(conn, from, sender, targetId) {
     return new Promise((resolve) => {
         const handler = (update) => {
@@ -37,14 +60,14 @@ function waitForReply(conn, from, sender, targetId) {
 cmd({
     pattern: "dinka",
     alias: ["dk", "movie"],
-    desc: "Drive File + Link Hybrid Downloader",
+    desc: "Fully Automated Movie Downloader",
     category: "downloader",
     react: "🎬",
 }, async (conn, mek, m, { from, q, reply, sender }) => {
     try {
         if (!q) return reply("❗ කරුණාකර නමක් ලබාදෙන්න.");
 
-        // 1. Search Results
+        // 🔍 Search කිරීම
         const searchRes = await axios.get(`${DK_BASE}/?action=search&query=${encodeURIComponent(q)}`).catch(e => null);
         if (!searchRes || !searchRes.data?.data?.length) return reply("❌ කිසිවක් හමු නොවීය.");
 
@@ -65,7 +88,7 @@ cmd({
 
                         await conn.sendMessage(from, { react: { text: "⏳", key: sel.msg.key } });
 
-                        // 2. Get Download Links
+                        // 🎥 Movie Details & Links ගැනීම
                         const detRes = await axios.get(`${DK_HANDLER}?action=movie&url=${encodeURIComponent(item.link)}`).catch(e => null);
                         if (!detRes || !detRes.data?.data?.download_links) return;
 
@@ -73,10 +96,7 @@ cmd({
                         let qText = `🎬 *${movieData.title}*\n\n*Select Quality:*`;
                         movieData.download_links.forEach((dl, i) => { qText += `\n*${i + 1}.* ${dl.quality}`; });
                         
-                        const sentQual = await conn.sendMessage(from, { 
-                            image: { url: item.image }, 
-                            caption: qText + `\n\nඅංකය Reply කරන්න.` 
-                        }, { quoted: sel.msg });
+                        const sentQual = await conn.sendMessage(from, { image: { url: item.image }, caption: qText + `\n\nඅංකය Reply කරන්න.` }, { quoted: sel.msg });
 
                         const qSel = await waitForReply(conn, from, sender, sentQual.key.id);
                         if (!qSel) return;
@@ -84,36 +104,29 @@ cmd({
                         const chosen = movieData.download_links[parseInt(qSel.text) - 1];
                         await conn.sendMessage(from, { react: { text: "📥", key: qSel.msg.key } });
 
-                        // 🔍 Unshorten and Identify Link
-                        let rawLink = await unshorten(chosen.direct_link);
-                        const isGdrive = rawLink.includes("drive.google.com") || rawLink.includes("docs.google.com");
+                        // 🔄 ලින්ක් එක පරීක්ෂා කර Original Name එක ලබා ගැනීම
+                        const fileInfo = await getFileInfo(chosen.direct_link);
+                        const isGdrive = fileInfo.url.includes("drive.google.com") || fileInfo.url.includes("docs.google.com");
 
                         if (isGdrive) {
-                            // 🚀 ක්‍රමය 1: Google Drive නම් SriHub හරහා ෆයිල් එකම එවන්න
-                            console.log(`[🚀 MODE] G-Drive. Sending File...`);
-                            const bypass = await axios.get(`${SRIHUB_BYPASS}?url=${encodeURIComponent(rawLink)}&apikey=${SRIHUB_KEY}`).catch(e => null);
-                            
+                            // 🚀 Google Drive නම් SriHub හරහා Auto-Upload
+                            const bypass = await axios.get(`${SRIHUB_BYPASS}?url=${encodeURIComponent(fileInfo.url)}&apikey=${SRIHUB_KEY}`).catch(e => null);
                             if (bypass?.data?.success) {
-                                const file = bypass.data.result;
                                 await conn.sendMessage(from, {
-                                    document: { url: file.downloadUrl },
-                                    fileName: file.fileName,
+                                    document: { url: bypass.data.result.downloadUrl },
+                                    fileName: bypass.data.result.fileName,
                                     mimetype: "video/mp4",
-                                    caption: `✅ *Drive File Uploaded*\n🎬 *${movieData.title}*\n💎 *Quality:* ${chosen.quality}\n⚖️ *Size:* ${file.fileSize}\n\n${DK_FOOTER}`
+                                    caption: `✅ *Drive Uploaded*\n🎬 *${movieData.title}*\n\n${DK_FOOTER}`
                                 }, { quoted: qSel.msg });
-                            } else {
-                                reply(`⚠️ SriHub Fail. Direct Link: ${rawLink}`);
                             }
                         } else {
-                            // 🚀 ක්‍රමය 2: වෙනත් ලින්ක් (Mirror/Direct) නම් ලින්ක් එක විතරක් එවන්න
-                            console.log(`[🔗 MODE] Direct Link. Sending Link only...`);
-                            let finalMsg = `✅ *DOWNLOAD LINK READY*\n\n`;
-                            finalMsg += `🎬 *Movie:* ${movieData.title}\n`;
-                            finalMsg += `🌟 *Quality:* ${chosen.quality}\n\n`;
-                            finalMsg += `🔗 *Link:* ${rawLink}\n\n`;
-                            finalMsg += `> මෙලෙස එවීමට හේතුව මෙය Google Drive ෆයිල් එකක් නොවීමයි.\n\n${DK_FOOTER}`;
-
-                            await conn.sendMessage(from, { text: finalMsg }, { quoted: qSel.msg });
+                            // 🚀 වෙනත් ලින්ක් නම් ඔයාගේ Screenshot එකේ තිබුණ විදිහටම Auto-Download
+                            await conn.sendMessage(from, {
+                                document: { url: fileInfo.url },
+                                fileName: fileInfo.name,
+                                mimetype: "video/mp4",
+                                caption: `✅ *Direct Uploaded*\n🎬 *${movieData.title}*\n\n${DK_FOOTER}`
+                            }, { quoted: qSel.msg });
                         }
 
                     } catch (err) { 
