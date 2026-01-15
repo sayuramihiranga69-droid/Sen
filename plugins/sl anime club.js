@@ -11,24 +11,17 @@ async function react(conn, jid, key, emoji) {
     try { await conn.sendMessage(jid, { react: { text: emoji, key } }); } catch {}
 }
 
-// ───────── Ultra-Secure Multi-User Wait Helper ─────────
+// ───────── Secure Multi-User Wait Helper ─────────
 function waitForReply(conn, from, sender, replyToId, timeout = 120000) {
     return new Promise((resolve, reject) => {
         const handler = (update) => {
             const msg = update.messages?.[0];
             if (!msg?.message) return;
-
-            const context = msg.message?.extendedTextMessage?.contextInfo;
+            const ctx = msg.message?.extendedTextMessage?.contextInfo;
             const text = msg.message.conversation || msg.message?.extendedTextMessage?.text;
             
-            // 🔒 පරීක්ෂාවන් 3 ක්:
-            // 1. මේ මැසේජ් එක රිප්ලයි එකක්ද?
-            // 2. රිප්ලයි කළේ අපි එවපු අදාළ පණිවිඩයටමද? (stanzaId)
-            // 3. රිප්ලයි කළේ ඒ සර්ච් එක කරපු පුද්ගලයාමද? (sender)
-            const isCorrectReply = context?.stanzaId === replyToId;
-            const isCorrectUser = msg.key.participant === sender || msg.key.remoteJid === sender;
-
-            if (msg.key.remoteJid === from && isCorrectReply && isCorrectUser) {
+            // StanzaId සහ Sender පරීක්ෂාව නිසා පටලැවෙන්නේ නැත
+            if (msg.key.remoteJid === from && ctx?.stanzaId === replyToId && (msg.key.participant === sender || msg.key.remoteJid === sender)) {
                 conn.ev.off("messages.upsert", handler);
                 resolve({ msg, text: text ? text.trim() : "" });
             }
@@ -36,7 +29,7 @@ function waitForReply(conn, from, sender, replyToId, timeout = 120000) {
         conn.ev.on("messages.upsert", handler);
         setTimeout(() => {
             conn.ev.off("messages.upsert", handler);
-            reject(new Error("Timeout! පමා වැඩි නිසා අවලංගු විය."));
+            reject(new Error("Timeout!"));
         }, timeout);
     });
 }
@@ -45,37 +38,40 @@ function waitForReply(conn, from, sender, replyToId, timeout = 120000) {
 cmd({
     pattern: "anime",
     alias: ["ac2", "movie"],
-    desc: "Anti-Conflict Anime Downloader",
+    desc: "Anime Downloader with IMDb and All Episodes",
     category: "downloader",
     react: "⛩️",
     filename: __filename,
 }, async (conn, mek, m, { from, q, reply, sender }) => {
     try {
-        if (!q) return reply("❗ කරුණාකර නමක් සඳහන් කරන්න.");
+        if (!q) return reply("❗ නමක් සඳහන් කරන්න.");
         await react(conn, from, m.key, "🔍");
 
-        // 1. සෙවීම
+        // 1. Search
         const searchRes = await axios.get(`${API_BASE}?action=search&query=${encodeURIComponent(q)}`);
         const results = searchRes.data?.data;
         if (!results?.length) return reply("❌ කිසිවක් හමු නොවීය.");
 
         let listText = "⛩️ *𝐀𝐍𝐈𝐌𝐄𝐂𝐋𝐔𝐁𝟐 𝐒𝐄𝐀𝐑𝐂𝐇*\n\n";
         results.slice(0, 10).forEach((v, i) => { listText += `*${i + 1}.* ${v.title}\n`; });
-        const listMsg = await conn.sendMessage(from, { text: listText + `\nඅදාළ අංකය Reply කරන්න.\n\n${AC2_FOOTER}` }, { quoted: m });
+        const listMsg = await conn.sendMessage(from, { text: listText + `\nඅංකය Reply කරන්න.\n\n${AC2_FOOTER}` }, { quoted: m });
 
-        // 2. තේරීම (stanzaId පාවිච්චි කර තනි තනියම හඳුනාගනී)
+        // 2. Selection
         const { msg: selMsg, text: selText } = await waitForReply(conn, from, sender, listMsg.key.id);
         const index = parseInt(selText) - 1;
         if (isNaN(index) || !results[index]) return reply("❌ වැරදි අංකයක්.");
         await react(conn, from, selMsg.key, "🎬");
 
-        // 3. විස්තර සහ එපිසෝඩ් (සීමාවකින් තොරව සියල්ල)
+        // 3. Details (Fetching IMDb)
         const detailsRes = await axios.get(`${API_BASE}?action=details&url=${encodeURIComponent(results[index].link)}`);
         const details = detailsRes.data?.data;
         let downloadUrl = results[index].link;
 
+        // IMDb Rating එක පෙන්වීම (Screenshot එකේ විදිහට)
+        const rating = details.imdb_rating ? `⭐ IMDb: ${details.imdb_rating}` : "";
+
         if (details.is_tv_show && details.episodes) {
-            let epText = `📺 *${details.title}*\n\n*Select Episode:*`;
+            let epText = `📺 *${details.title}*\n${rating}\n\n*Select Episode:*`;
             details.episodes.forEach((ep, i) => { epText += `\n*${i + 1}.* Episode ${ep.ep_num}`; });
             
             const epMsg = await conn.sendMessage(from, { 
@@ -84,27 +80,26 @@ cmd({
             }, { quoted: selMsg });
 
             const { msg: epSelMsg, text: epSelText } = await waitForReply(conn, from, sender, epMsg.key.id);
-            const epIdx = parseInt(epSelText) - 1;
-            downloadUrl = details.episodes[epIdx].link;
+            downloadUrl = details.episodes[parseInt(epSelText) - 1].link;
             await react(conn, from, epSelMsg.key, "📥");
         }
 
-        // 4. Quality තේරීම
+        // 4. Quality
         const dlRes = await axios.get(`${API_BASE}?action=download&url=${encodeURIComponent(downloadUrl)}`);
         const dlLinks = dlRes.data?.download_links;
         
         let qText = `🎬 *Select Quality:*`;
         dlLinks.forEach((dl, i) => { qText += `\n*${i + 1}.* ${dl.quality}`; });
-        const qMsg = await conn.sendMessage(from, { text: qText + `\n\nQuality අංකය Reply කරන්න.` }, { quoted: selMsg });
+        const qMsg = await conn.sendMessage(from, { text: qText }, { quoted: selMsg });
 
         const { msg: lastMsg, text: lastText } = await waitForReply(conn, from, sender, qMsg.key.id);
         const chosen = dlLinks[parseInt(lastText) - 1];
         await react(conn, from, lastMsg.key, "⏳");
 
-        // 5. SriHub Bypass හරහා Real File ලබාගැනීම
+        // 5. SriHub Bypass & Final Send
         const bypassRes = await axios.get(`${SRIHUB_BYPASS_API}?url=${encodeURIComponent(chosen.direct_link)}&apikey=${SRIHUB_KEY}`);
         
-        if (bypassRes.data && bypassRes.data.success) {
+        if (bypassRes.data?.success) {
             const realFile = bypassRes.data.result;
             const docMsg = await conn.sendMessage(from, {
                 document: { url: realFile.downloadUrl },
@@ -114,11 +109,10 @@ cmd({
             }, { quoted: lastMsg });
             await react(conn, from, docMsg.key, "✅");
         } else {
-            reply("❌ Real File එක ලබාගැනීම අසාර්ථකයි.");
+            reply("❌ Real File එක සකස් කිරීම අසාර්ථකයි.");
         }
 
     } catch (e) {
-        console.error(e);
         reply("⚠️ දෝෂයක්: " + e.message);
     }
 });
