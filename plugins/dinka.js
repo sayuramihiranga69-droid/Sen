@@ -37,14 +37,13 @@ function waitForReply(conn, from, sender, targetId) {
 cmd({
     pattern: "dinka",
     alias: ["dk", "movie"],
-    desc: "Drive File + Link Hybrid Downloader",
+    desc: "Drive File + Other Link Only Hybrid",
     category: "downloader",
     react: "🎬",
 }, async (conn, mek, m, { from, q, reply, sender }) => {
     try {
         if (!q) return reply("❗ කරුණාකර නමක් ලබාදෙන්න.");
 
-        // 1. Search Results
         const searchRes = await axios.get(`${DK_BASE}/?action=search&query=${encodeURIComponent(q)}`).catch(e => null);
         if (!searchRes || !searchRes.data?.data?.length) return reply("❌ කිසිවක් හමු නොවීය.");
 
@@ -65,7 +64,6 @@ cmd({
 
                         await conn.sendMessage(from, { react: { text: "⏳", key: sel.msg.key } });
 
-                        // 2. Get Download Links
                         const detRes = await axios.get(`${DK_HANDLER}?action=movie&url=${encodeURIComponent(item.link)}`).catch(e => null);
                         if (!detRes || !detRes.data?.data?.download_links) return;
 
@@ -84,37 +82,35 @@ cmd({
                         const chosen = movieData.download_links[parseInt(qSel.text) - 1];
                         await conn.sendMessage(from, { react: { text: "📥", key: qSel.msg.key } });
 
-                        // 🔍 Unshorten and Identify Link
+                        // 🔍 ලින්ක් එක පරීක්ෂාව
                         let rawLink = await unshorten(chosen.direct_link);
-                        const isGdrive = rawLink.includes("drive.google.com") || rawLink.includes("docs.google.com");
+                        const isGdrive = rawLink.includes("drive.google.com") || 
+                                         rawLink.includes("docs.google.com") || 
+                                         rawLink.includes("drive.usercontent.google.com");
 
                         if (isGdrive) {
-                            // 🚀 ක්‍රමය 1: Google Drive නම් SriHub හරහා ෆයිල් එකම එවන්න
-                            console.log(`[🚀 MODE] G-Drive. Sending File...`);
+                            // 🚀 Google Drive නම් SriHub හරහා File එකම එවන්න
                             const bypass = await axios.get(`${SRIHUB_BYPASS}?url=${encodeURIComponent(rawLink)}&apikey=${SRIHUB_KEY}`).catch(e => null);
                             
                             if (bypass?.data?.success) {
                                 const file = bypass.data.result;
-                                await conn.sendMessage(from, {
+                                return await conn.sendMessage(from, {
                                     document: { url: file.downloadUrl },
                                     fileName: file.fileName,
                                     mimetype: "video/mp4",
-                                    caption: `✅ *Drive File Uploaded*\n🎬 *${movieData.title}*\n💎 *Quality:* ${chosen.quality}\n⚖️ *Size:* ${file.fileSize}\n\n${DK_FOOTER}`
+                                    caption: `✅ *Drive File Uploaded*\n🎬 *${movieData.title}*\n💎 *Quality:* ${chosen.quality}\n\n${DK_FOOTER}`
                                 }, { quoted: qSel.msg });
-                            } else {
-                                reply(`⚠️ SriHub Fail. Direct Link: ${rawLink}`);
                             }
-                        } else {
-                            // 🚀 ක්‍රමය 2: වෙනත් ලින්ක් (Mirror/Direct) නම් ලින්ක් එක විතරක් එවන්න
-                            console.log(`[🔗 MODE] Direct Link. Sending Link only...`);
-                            let finalMsg = `✅ *DOWNLOAD LINK READY*\n\n`;
-                            finalMsg += `🎬 *Movie:* ${movieData.title}\n`;
-                            finalMsg += `🌟 *Quality:* ${chosen.quality}\n\n`;
-                            finalMsg += `🔗 *Link:* ${rawLink}\n\n`;
-                            finalMsg += `> මෙලෙස එවීමට හේතුව මෙය Google Drive ෆයිල් එකක් නොවීමයි.\n\n${DK_FOOTER}`;
-
-                            await conn.sendMessage(from, { text: finalMsg }, { quoted: qSel.msg });
                         }
+
+                        // 🚀 වෙනත් ලින්ක් නම් ලින්ක් එක විතරක් මැසේජ් එකකින් එවන්න
+                        let finalMsg = `✅ *DOWNLOAD LINK READY*\n\n`;
+                        finalMsg += `🎬 *Movie:* ${movieData.title}\n`;
+                        finalMsg += `🌟 *Quality:* ${chosen.quality}\n\n`;
+                        finalMsg += `🔗 *Link:* ${rawLink}\n\n`;
+                        finalMsg += `> මෙලෙස එවීමට හේතුව මෙය Google Drive ෆයිල් එකක් නොවීමයි.\n\n${DK_FOOTER}`;
+
+                        await conn.sendMessage(from, { text: finalMsg }, { quoted: qSel.msg });
 
                     } catch (err) { 
                         console.log(err);
