@@ -11,26 +11,26 @@ async function react(conn, jid, key, emoji) {
     try { await conn.sendMessage(jid, { react: { text: emoji, key } }); } catch {}
 }
 
-// ───────── High-Speed Multi-User Wait Helper ─────────
+// ───────── LID Compatible Wait Helper ─────────
 function waitForReply(conn, from, sender, timeout = 60000) {
     return new Promise((resolve, reject) => {
         const handler = (update) => {
             const msg = update.messages?.[0];
             if (!msg?.message) return;
 
-            // කොන්සෝල් එකේ හැම මැසේජ් එකක්ම පෙන්වයි (Debugging)
             const text = msg.message.conversation || msg.message?.extendedTextMessage?.text || "";
             const msgSender = msg.key.participant || msg.key.remoteJid;
             
-            // ඔයා එවපු අංකය කොන්සෝල් එකේ ප්‍රින්ට් කරයි
+            // 🔍 Console log every message to see if it reaches here
             if (msg.key.remoteJid === from) {
-                console.log(`[INCOMING MESSAGE] From: ${msgSender}, Text: ${text}`);
+                console.log(`[INCOMING] Text: ${text} | From: ${msgSender}`);
             }
 
-            // අංකයක් ද සහ යූසර් නිවැරදිදැයි පරීක්ෂාව
-            const isCorrectUser = msgSender.split('@')[0] === sender.split('@')[0];
+            // 🛡️ LID සහ සාමාන්‍ය JID දෙකම චෙක් කරනවා
+            const isCorrectUser = msgSender.includes(sender.split('@')[0]) || msgSender.includes("@lid");
+
             if (msg.key.remoteJid === from && isCorrectUser && !isNaN(text) && text.length > 0) {
-                console.log(`[MATCH FOUND] User selected: ${text}`);
+                console.log(`[MATCH] Processing selection: ${text}`);
                 conn.ev.off("messages.upsert", handler);
                 resolve({ msg, text: text.trim() });
             }
@@ -47,14 +47,14 @@ function waitForReply(conn, from, sender, timeout = 60000) {
 cmd({
     pattern: "anime",
     alias: ["ac2", "movie"],
-    desc: "Optimized Anime Downloader",
+    desc: "Fixed Anime Downloader",
     category: "downloader",
     react: "⛩️",
     filename: __filename,
 }, async (conn, mek, m, { from, q, reply, sender }) => {
     try {
         if (!q) return reply("❗ කරුණාකර නමක් සඳහන් කරන්න.");
-        console.log(`[CONSOLE] Search started: ${q} by ${sender}`);
+        console.log(`[START] Search for: ${q}`);
         await react(conn, from, m.key, "🔍");
 
         // 1. Search
@@ -72,16 +72,15 @@ cmd({
         if (isNaN(index) || !results[index]) return reply("❌ වැරදි අංකයක්.");
         await react(conn, from, selMsg.key, "🎬");
 
-        // 3. Get Details & Force Episode List
+        // 3. Get Details
         const detailsRes = await axios.get(`${API_BASE}?action=details&url=${encodeURIComponent(results[index].link)}`);
         const details = detailsRes.data?.data;
         let downloadUrl = results[index].link;
 
+        // Force Episode List
         if (details.episodes && details.episodes.length > 0) {
-            console.log(`[CONSOLE] Episode list displaying...`);
             let epText = `📺 *${details.title}*\n\n*Select Episode:*`;
             details.episodes.forEach((ep, i) => { epText += `\n*${i + 1}.* Episode ${ep.ep_num}`; });
-            
             await conn.sendMessage(from, { 
                 image: { url: details.image }, 
                 caption: epText + `\n\nඑපිසෝඩ් අංකය Reply කරන්න.\n${AC2_FOOTER}`
@@ -98,14 +97,13 @@ cmd({
         
         let qText = `🎬 *Select Quality:*`;
         dlLinks.forEach((dl, i) => { qText += `\n*${i + 1}.* ${dl.quality}`; });
-        await conn.sendMessage(from, { text: qText + `\n\nQuality අංකය Reply කරන්න.` }, { quoted: m });
+        await conn.sendMessage(from, { text: qText + `\n\nඅංකය Reply කරන්න.` }, { quoted: m });
 
         const { msg: lastMsg, text: lastText } = await waitForReply(conn, from, sender);
         const chosen = dlLinks[parseInt(lastText) - 1];
         await react(conn, from, lastMsg.key, "⏳");
 
         // 5. SriHub Bypass
-        console.log(`[CONSOLE] Fetching Real File for: ${chosen.quality}`);
         const bypassRes = await axios.get(`${SRIHUB_BYPASS_API}?url=${encodeURIComponent(chosen.direct_link)}&apikey=${SRIHUB_KEY}`);
         
         if (bypassRes.data?.success) {
@@ -122,7 +120,7 @@ cmd({
         }
 
     } catch (e) {
-        console.log(`[FATAL ERROR] ${e.message}`);
+        console.log(`[ERROR] ${e.message}`);
         reply("⚠️ දෝෂයක්: " + e.message);
     }
 });
