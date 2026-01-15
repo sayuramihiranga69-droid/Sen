@@ -1,7 +1,7 @@
 const { cmd } = require("../command");
 const axios = require("axios");
 
-const DK_FOOTER = "✫☘𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌𝐄☢️☘";
+const DK_FOOTER = "✫☘ 𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌𝐄 ☢️☘";
 const DK_BASE = "https://dinka-mu.vercel.app";
 const DK_HANDLER = "https://dinka-mu.vercel.app/api/handler";
 const SRIHUB_BYPASS = "https://api.srihub.store/download/gdrive";
@@ -37,6 +37,7 @@ cmd({
     try {
         if (!q) return reply("❗ කරුණාකර නමක් ලබාදෙන්න.");
 
+        // 🟢 Console Search Log
         console.log(`\n[🔍 SEARCH] User: ${sender} | Query: ${q}`);
 
         const searchRes = await axios.get(`${DK_BASE}/?action=search&query=${encodeURIComponent(q)}`);
@@ -46,7 +47,7 @@ cmd({
             return reply("❌ කිසිවක් හමු නොවීය.");
         }
 
-        console.log(`[✅ FOUND] ${results.length} results found.`);
+        console.log(`[✅ FOUND] ${results.length} results for "${q}"`);
 
         let listText = "🔥 *𝐒𝐀𝐘𝐔𝐑𝐀 𝐒𝐄𝐀𝐑𝐂𝐇*\n\n";
         results.slice(0, 10).forEach((v, i) => { listText += `*${i + 1}.* ${v.title}\n`; });
@@ -62,13 +63,13 @@ cmd({
                         const item = results[parseInt(sel.text) - 1];
                         if (!item) return;
 
-                        console.log(`[🎯 SELECTED] User picked: ${item.title}`);
+                        console.log(`[🎯 SELECTED] Movie: ${item.title}`);
                         await conn.sendMessage(from, { react: { text: "⏳", key: sel.msg.key } });
 
                         const detRes = await axios.get(`${DK_HANDLER}?action=movie&url=${encodeURIComponent(item.link)}`);
                         const movieData = detRes.data?.data;
                         if (!movieData?.download_links) {
-                            console.log(`[❌ ERROR] Could not fetch links for: ${item.title}`);
+                            console.log(`[❌ FAIL] Links not found for: ${item.title}`);
                             return;
                         }
 
@@ -86,24 +87,49 @@ cmd({
                         const chosen = movieData.download_links[parseInt(qSel.text) - 1];
                         const rawLink = chosen.direct_link;
 
-                        console.log(`[💎 QUALITY] User selected: ${chosen.quality}`);
-                        console.log(`[🔗 LINK] Raw URL: ${rawLink}`);
-
+                        console.log(`[📥 START] Quality: ${chosen.quality} | Link: ${rawLink}`);
                         await conn.sendMessage(from, { react: { text: "📥", key: qSel.msg.key } });
 
                         // --- Smart Link Router ---
                         const isGdrive = rawLink.includes("drive.google.com") || rawLink.includes("da.gd") || rawLink.includes("gdrive");
 
                         if (isGdrive) {
-                            console.log(`[🚀 MODE] G-Drive detected. Sending to SriHub Bypass...`);
+                            console.log(`[🚀 MODE] G-Drive Link. Sending to SriHub...`);
                             const bypass = await axios.get(`${SRIHUB_BYPASS}?url=${encodeURIComponent(rawLink)}&apikey=${SRIHUB_KEY}`);
                             
                             if (bypass.data?.success) {
                                 const file = bypass.data.result;
-                                console.log(`[✅ BYPASS] Success! Filename: ${file.fileName} | Size: ${file.fileSize}`);
+                                console.log(`[✅ BYPASS DONE] File: ${file.fileName} (${file.fileSize})`);
                                 
                                 await conn.sendMessage(from, {
                                     document: { url: file.downloadUrl },
                                     fileName: file.fileName,
                                     mimetype: file.mimetype,
-                                    caption: `✅ *G-Drive Bypass Done*\n🎬 *${movieData.title}*\n💎 *Quality:* ${chosen.quality}\n\n${DK_FOOTER}`
+                                    caption: `✅ *Download Complete*\n🎬 *${movieData.title}*\n💎 *Quality:* ${chosen.quality}\n⚖️ *Size:* ${file.fileSize}\n\n${DK_FOOTER}`
+                                }, { quoted: qSel.msg });
+                            } else {
+                                console.log(`[❌ BYPASS FAIL] Error: ${bypass.data?.message}`);
+                                reply("❌ Bypass අසාර්ථකයි.");
+                            }
+                        } else {
+                            console.log(`[🚀 MODE] Direct Link. Sending directly...`);
+                            await conn.sendMessage(from, {
+                                document: { url: rawLink },
+                                fileName: `${movieData.title}.mp4`,
+                                mimetype: "video/mp4",
+                                caption: `✅ *Direct Download*\n🎬 *${movieData.title}*\n💎 *Quality:* ${chosen.quality}\n\n${DK_FOOTER}`
+                            }, { quoted: qSel.msg });
+                        }
+
+                    } catch (err) { 
+                        console.log(`[⚠️ ERROR] ${err.message}`);
+                    }
+                })();
+            }
+        };
+
+        startFlow();
+    } catch (e) { 
+        console.log(`[⚠️ ERROR] ${e.message}`);
+    }
+});
