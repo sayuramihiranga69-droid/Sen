@@ -10,16 +10,17 @@ const DK_HANDLER = "https://dinka-mu.vercel.app/api/handler";
 const SRIHUB_BYPASS = "https://api.srihub.store/download/gdrive";
 const SRIHUB_KEY = "dew_YyT0KDc2boHDasFlmZCqDcPoeDHReD20aYmEsm1G";
 
-// 🔗 Unshortener Function - කෙටි කරපු ලින්ක් එකේ නියම මුහුණුවර සොයයි
+// 🔗 Unshortener: කෙටි කරපු ලින්ක් (cutt.ly, da.gd) වල නියම ලින්ක් එක සොයයි
 async function unshorten(url) {
     try {
-        const response = await axios.head(url, { maxRedirects: 10 });
+        const response = await axios.head(url, { maxRedirects: 15, timeout: 10000 });
         return response.request.res.responseUrl || url;
     } catch (e) {
-        return url; // මොකක් හරි අවුලක් වුණොත් මුල් ලින්ක් එකම දෙනවා
+        return url;
     }
 }
 
+// ───────── Multi-Tasking Waiter ─────────
 function waitForReply(conn, from, sender, targetId) {
     return new Promise((resolve) => {
         const handler = (update) => {
@@ -42,7 +43,7 @@ function waitForReply(conn, from, sender, targetId) {
 cmd({
     pattern: "dinka",
     alias: ["dk", "movie"],
-    desc: "Unshortener + Stable Downloader",
+    desc: "Anti-Abort Stable Downloader with Unshortener",
     category: "downloader",
     react: "🎬",
 }, async (conn, mek, m, { from, q, reply, sender }) => {
@@ -88,7 +89,7 @@ cmd({
 
                         await conn.sendMessage(from, { react: { text: "📥", key: qSel.msg.key } });
 
-                        // 🔍 ලින්ක් එක Unshorten කිරීම (cutt.ly -> drive.google.com)
+                        // 🔍 1. Link Unshorten කිරීම (da.gd -> Heroku Mirror)
                         console.log(`[🔗 RAW] ${rawLink}`);
                         rawLink = await unshorten(rawLink);
                         console.log(`[🔓 UNSHORTENED] ${rawLink}`);
@@ -97,7 +98,7 @@ cmd({
 
                         if (isGdrive) {
                             console.log(`[🚀 MODE] G-Drive Bypass`);
-                            const bypass = await axios.get(`${SRIHUB_BYPASS}?url=${encodeURIComponent(rawLink)}&apikey=${SRIHUB_KEY}`);
+                            const bypass = await axios.get(`${SRIHUB_BYPASS}?url=${encodeURIComponent(rawLink)}&apikey=${SRIHUB_KEY}`).catch(e => null);
                             if (bypass?.data?.success) {
                                 await conn.sendMessage(from, {
                                     document: { url: bypass.data.result.downloadUrl },
@@ -107,10 +108,31 @@ cmd({
                                 }, { quoted: qSel.msg });
                             }
                         } else {
-                            // 📂 Direct Link - Temp Save Upload
-                            console.log(`[📂 TEMP] Streaming to disk...`);
-                            const response = await axios({ method: 'get', url: rawLink, responseType: 'stream', timeout: 0 });
-                            await pipeline(response.data, fs.createWriteStream(tempPath));
+                            // 📂 2. Direct Link - Anti-Abort Retry ලොජික් එක
+                            console.log(`[📂 TEMP] Streaming to disk with Retry logic...`);
+                            
+                            const downloadWithRetry = async (url, targetPath, retries = 3) => {
+                                for (let i = 0; i < retries; i++) {
+                                    try {
+                                        const response = await axios({
+                                            method: 'get',
+                                            url: url,
+                                            responseType: 'stream',
+                                            timeout: 0,
+                                            headers: { 'User-Agent': 'Mozilla/5.0', 'Connection': 'keep-alive' }
+                                        });
+                                        await pipeline(response.data, fs.createWriteStream(targetPath));
+                                        return true;
+                                    } catch (err) {
+                                        console.log(`[⚠️ RETRY ${i+1}] Download aborted: ${err.message}`);
+                                        if (i === retries - 1) throw err;
+                                        await new Promise(r => setTimeout(r, 2000));
+                                    }
+                                }
+                            };
+
+                            await downloadWithRetry(rawLink, tempPath);
+                            console.log(`[✅ SAVED] Ready to upload.`);
 
                             await conn.sendMessage(from, {
                                 document: fs.createReadStream(tempPath),
@@ -124,6 +146,7 @@ cmd({
                     } catch (err) { 
                         console.log(`[⚠️ ERROR] ${err.message}`);
                         if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+                        reply("❌ ඩවුන්ලෝඩ් එක අසාර්ථකයි. සර්වර් එකේ අවුලක් විය හැක.");
                     }
                 })();
             }
