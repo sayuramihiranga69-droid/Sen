@@ -10,7 +10,16 @@ const DK_HANDLER = "https://dinka-mu.vercel.app/api/handler";
 const SRIHUB_BYPASS = "https://api.srihub.store/download/gdrive";
 const SRIHUB_KEY = "dew_YyT0KDc2boHDasFlmZCqDcPoeDHReD20aYmEsm1G";
 
-// ───────── Multi-Tasking Waiter ─────────
+// 🔗 Unshortener Function - කෙටි කරපු ලින්ක් එකේ නියම මුහුණුවර සොයයි
+async function unshorten(url) {
+    try {
+        const response = await axios.head(url, { maxRedirects: 10 });
+        return response.request.res.responseUrl || url;
+    } catch (e) {
+        return url; // මොකක් හරි අවුලක් වුණොත් මුල් ලින්ක් එකම දෙනවා
+    }
+}
+
 function waitForReply(conn, from, sender, targetId) {
     return new Promise((resolve) => {
         const handler = (update) => {
@@ -33,7 +42,7 @@ function waitForReply(conn, from, sender, targetId) {
 cmd({
     pattern: "dinka",
     alias: ["dk", "movie"],
-    desc: "Dinka Temp Storage Downloader",
+    desc: "Unshortener + Stable Downloader",
     category: "downloader",
     react: "🎬",
 }, async (conn, mek, m, { from, q, reply, sender }) => {
@@ -55,6 +64,7 @@ cmd({
                 if (!sel) break;
 
                 (async () => {
+                    let tempPath = path.join(__dirname, `../${Date.now()}.mp4`);
                     try {
                         const item = results[parseInt(sel.text) - 1];
                         if (!item) return;
@@ -74,54 +84,46 @@ cmd({
                         if (!qSel) return;
 
                         const chosen = movieData.download_links[parseInt(qSel.text) - 1];
-                        const rawLink = chosen.direct_link;
+                        let rawLink = chosen.direct_link;
 
                         await conn.sendMessage(from, { react: { text: "📥", key: qSel.msg.key } });
+
+                        // 🔍 ලින්ක් එක Unshorten කිරීම (cutt.ly -> drive.google.com)
+                        console.log(`[🔗 RAW] ${rawLink}`);
+                        rawLink = await unshorten(rawLink);
+                        console.log(`[🔓 UNSHORTENED] ${rawLink}`);
 
                         const isGdrive = rawLink.includes("drive.google.com") || rawLink.includes("docs.google.com");
 
                         if (isGdrive) {
-                            // G-Drive නම් කලින් වගේම SriHub යවනවා (ඒක ලේසියි)
-                            console.log(`[🚀 MODE] G-Drive Link. Sending to SriHub...`);
-                            const bypass = await axios.get(`${SRIHUB_BYPASS}?url=${encodeURIComponent(rawLink)}&apikey=${SRIHUB_KEY}`).catch(e => null);
+                            console.log(`[🚀 MODE] G-Drive Bypass`);
+                            const bypass = await axios.get(`${SRIHUB_BYPASS}?url=${encodeURIComponent(rawLink)}&apikey=${SRIHUB_KEY}`);
                             if (bypass?.data?.success) {
-                                const file = bypass.data.result;
                                 await conn.sendMessage(from, {
-                                    document: { url: file.downloadUrl },
-                                    fileName: file.fileName,
-                                    mimetype: file.mimetype,
-                                    caption: `✅ *Download Complete*\n🎬 *${movieData.title}*\n💎 *Quality:* ${chosen.quality}\n\n${DK_FOOTER}`
+                                    document: { url: bypass.data.result.downloadUrl },
+                                    fileName: bypass.data.result.fileName,
+                                    mimetype: bypass.data.result.mimetype,
+                                    caption: `✅ *Download Complete*\n🎬 *${movieData.title}*\n\n${DK_FOOTER}`
                                 }, { quoted: qSel.msg });
                             }
                         } else {
-                            // 📂 Direct Link (Raani): Temp Save ලොජික් එක
-                            console.log(`[📂 TEMP] Downloading to local storage...`);
-                            const tempPath = path.join(__dirname, `../${Date.now()}.mp4`);
-                            
-                            const response = await axios({
-                                method: 'get',
-                                url: rawLink,
-                                responseType: 'stream'
-                            });
-
-                            // Stream එක හරහා ෆයිල් එක Hard Disk එකට ලියනවා
+                            // 📂 Direct Link - Temp Save Upload
+                            console.log(`[📂 TEMP] Streaming to disk...`);
+                            const response = await axios({ method: 'get', url: rawLink, responseType: 'stream', timeout: 0 });
                             await pipeline(response.data, fs.createWriteStream(tempPath));
-                            console.log(`[✅ SAVED] Temp file ready. Uploading to WhatsApp...`);
 
                             await conn.sendMessage(from, {
-                                document: fs.readFileSync(tempPath),
+                                document: fs.createReadStream(tempPath),
                                 fileName: `${movieData.title.split('|')[0].trim()}.mp4`,
                                 mimetype: "video/mp4",
-                                caption: `✅ *Temp Upload Complete*\n🎬 *${movieData.title}*\n💎 *Quality:* ${chosen.quality}\n\n${DK_FOOTER}`
+                                caption: `✅ *Upload Complete*\n🎬 *${movieData.title}*\n\n${DK_FOOTER}`
                             }, { quoted: qSel.msg });
 
-                            // අප්ලෝඩ් එකෙන් පස්සේ Temp ෆයිල් එක Delete කරනවා
-                            fs.unlinkSync(tempPath);
-                            console.log(`[🗑️ CLEAN] Temp file deleted.`);
+                            if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
                         }
                     } catch (err) { 
                         console.log(`[⚠️ ERROR] ${err.message}`);
-                        reply("❌ ඩවුන්ලෝඩ් කිරීමේ දෝෂයක්. නැවත උත්සාහ කරන්න.");
+                        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
                     }
                 })();
             }
