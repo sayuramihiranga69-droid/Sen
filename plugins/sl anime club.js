@@ -17,7 +17,6 @@ function waitForReply(conn, from, sender, targetId) {
             const context = msg.message?.extendedTextMessage?.contextInfo;
             const msgSender = msg.key.participant || msg.key.remoteJid;
             
-            // රිප්ලයි කරපු මැසේජ් එකේ ID එක හරියටම මැච් කරනවා
             const isTargetReply = context?.stanzaId === targetId;
             const isCorrectUser = msgSender.includes(sender.split('@')[0]) || msgSender.includes("@lid");
 
@@ -27,14 +26,14 @@ function waitForReply(conn, from, sender, targetId) {
             }
         };
         conn.ev.on("messages.upsert", handler);
-        setTimeout(() => { conn.ev.off("messages.upsert", handler); }, 180000); // විනාඩි 3ක් කල් දෙනවා
+        setTimeout(() => { conn.ev.off("messages.upsert", handler); }, 180000); 
     });
 }
 
 cmd({
     pattern: "anime",
     alias: ["ac2", "movie"],
-    desc: "Infinite Selection Anime Downloader",
+    desc: "Series & Movie Supported Multi-Tasking",
     category: "downloader",
     react: "⛩️",
     filename: __filename,
@@ -48,15 +47,14 @@ cmd({
 
         let listText = "⛩️ *𝐀𝐍𝐈𝐌𝐄𝐂𝐋𝐔𝐁𝟐 𝐒𝐄𝐀𝐑𝐂𝐇*\n\n";
         results.slice(0, 10).forEach((v, i) => { listText += `*${i + 1}.* ${v.title}\n`; });
-        const sentSearch = await conn.sendMessage(from, { text: listText + `\nඅදාළ අංක Reply කරන්න. (ඔයාට ඕනෑම වාර ගණනක් තේරිය හැක)` }, { quoted: m });
+        const sentSearch = await conn.sendMessage(from, { text: listText + `\nඅදාළ අංක Reply කරන්න.` }, { quoted: m });
 
-        // 🔄 මේ Function එකෙන් තමයි හැම තේරීමක්ම ස්වාධීනව පාලනය කරන්නේ
-        const startDownloadFlow = async () => {
+        // 🔄 Recursive Flow for Handling Multiple Selections
+        const startFlow = async () => {
             while (true) {
                 const selection = await waitForReply(conn, from, sender, sentSearch.key.id);
                 if (!selection) break;
 
-                // මේ තේරීම සඳහා වෙනම 'Thread' එකක් පටන් ගන්නවා
                 (async () => {
                     try {
                         const idx = parseInt(selection.text) - 1;
@@ -65,23 +63,42 @@ cmd({
 
                         await conn.sendMessage(from, { react: { text: "⏳", key: selection.msg.key } });
 
-                        // විස්තර සහ Quality ගැනීම
-                        const dlRes = await axios.get(`${API_BASE}?action=download&url=${encodeURIComponent(selected.link)}`);
+                        // 1. Fetch Details (Check for Episodes)
+                        const detRes = await axios.get(`${API_BASE}?action=details&url=${encodeURIComponent(selected.link)}`);
+                        const details = detRes.data?.data;
+                        let finalUrl = selected.link;
+
+                        // 📺 Series එකක් නම් Episode List එක පෙන්නනවා
+                        if (details.episodes && details.episodes.length > 0) {
+                            let epText = `📺 *${details.title}*\n\n*Select Episode:*`;
+                            details.episodes.forEach((ep, i) => { epText += `\n*${i + 1}.* Episode ${ep.ep_num}`; });
+                            
+                            const sentEp = await conn.sendMessage(from, { 
+                                image: { url: details.image }, 
+                                caption: epText + `\n\nඑපිසෝඩ් අංකය එවන්න.` 
+                            }, { quoted: selection.msg });
+
+                            const epSelection = await waitForReply(conn, from, sender, sentEp.key.id);
+                            if (!epSelection) return;
+                            finalUrl = details.episodes[parseInt(epSelection.text) - 1].link;
+                        }
+
+                        // 🎬 2. Fetch Qualities
+                        const dlRes = await axios.get(`${API_BASE}?action=download&url=${encodeURIComponent(finalUrl)}`);
                         const dlLinks = dlRes.data?.download_links;
 
-                        let qText = `🎬 *Select Quality:* \n*${selected.title}*`;
+                        let qText = `🎬 *Select Quality:* \n*${details.title}*`;
                         dlLinks.forEach((dl, i) => { qText += `\n*${i + 1}.* ${dl.quality}`; });
                         
                         const sentQual = await conn.sendMessage(from, { text: qText + `\n\nQuality අංකය එවන්න.` }, { quoted: selection.msg });
 
-                        // Quality එක එනකම් බලන් ඉන්නවා
                         const qSel = await waitForReply(conn, from, sender, sentQual.key.id);
                         if (!qSel) return;
 
                         const chosen = dlLinks[parseInt(qSel.text) - 1];
                         await conn.sendMessage(from, { react: { text: "📥", key: qSel.msg.key } });
 
-                        // Bypass & Upload
+                        // 3. Bypass & Upload
                         const bypass = await axios.get(`${SRIHUB_BYPASS_API}?url=${encodeURIComponent(chosen.direct_link)}&apikey=${SRIHUB_KEY}`);
                         if (bypass.data?.success) {
                             const file = bypass.data.result;
@@ -89,18 +106,15 @@ cmd({
                                 document: { url: file.downloadUrl },
                                 fileName: file.fileName,
                                 mimetype: file.mimetype,
-                                caption: `✅ *Download Complete*\n🎬 *${selected.title}*\n💎 *Quality:* ${chosen.quality}\n\n${AC2_FOOTER}`
+                                caption: `✅ *Download Complete*\n🎬 *${details.title}*\n💎 *Quality:* ${chosen.quality}\n\n${AC2_FOOTER}`
                             }, { quoted: qSel.msg });
                         }
                     } catch (err) { console.log(err); }
                 })();
-                
-                // 💡 මෙතනදී loop එක දිගටම යන නිසා, ඔයාට ආයෙත් ආයෙත් සර්ච් ලිස්ට් එකට රිප්ලයි කරන්න පුළුවන්.
             }
         };
 
-        // Flow එක පටන් ගන්නවා
-        startDownloadFlow();
+        startFlow();
 
     } catch (e) {
         console.log(e);
