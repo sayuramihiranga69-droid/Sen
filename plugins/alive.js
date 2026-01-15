@@ -3,7 +3,7 @@ const axios = require('axios');
 
 cmd({
     pattern: "balance",
-    alias: ["checkcoins"],
+    alias: ["checkcoins", "keyinfo"],
     react: "💰",
     desc: "Check SriHub API balance using a specific API Key.",
     category: "user",
@@ -13,27 +13,29 @@ cmd({
 
 async(conn, mek, m, { from, q, reply }) => {
     try {
-        // q හරහා ලැබෙන්නේ command එකට පස්සේ user ටයිප් කරන දේ (API Key එක)
-        if (!q) return reply("❗ කරුණාකර API Key එක ලබා දෙන්න.\n\n*Usage:* .balance YOUR_API_KEY");
+        if (!q) return reply("❗ කරුණාකර API Key එක ලබා දෙන්න.\n\n*Usage:* .balance dew_YyT0KD...");
 
         const apiKey = q.trim();
-        const apiUrl = `https://api.srihub.store/user/info?apikey=${apiKey}`;
+        
+        // SriHub API එකේ සාමාන්‍යයෙන් Key එක check කරන ලින්ක් එක
+        // ඔබේ API documentation එකේ මේ ලින්ක් එක මීට වඩා වෙනස් නම් එය මෙතනට දාන්න
+        const apiUrl = `https://api.srihub.store/api/keyinfo?apikey=${apiKey}`;
 
         await conn.sendMessage(from, { react: { text: "⏳", key: m.key } });
 
-        // API එකට Request එක යැවීම
-        const response = await axios.get(apiUrl).catch(e => null);
-
-        if (!response || !response.data) {
-            return reply("❌ දත්ත ලබා ගැනීමට නොහැකි විය. කරුණාකර API Key එක පරීක්ෂා කරන්න.");
-        }
+        const response = await axios.get(apiUrl).catch(e => {
+            return { data: { status: false, message: e.message } };
+        });
 
         const data = response.data;
 
-        if (data.status) {
-            const name = data.result.name || "User";
-            const coins = data.result.coins || "0";
-            const limit = data.result.limit || "Unlimited";
+        // මෙහිදී 'status' හෝ 'success' යන දෙකෙන් එකක් තිබිය හැක
+        if (data.status || data.success) {
+            const res = data.result || data; // සමහර විට result ඇතුළේ නැතිව කෙලින්ම දත්ත එන්න පුළුවන්
+            
+            const name = res.name || "User";
+            const coins = res.coins || res.balance || "0";
+            const limit = res.limit || "Unlimited";
 
             let balanceMsg = `*─── [ SRIHUB KEY INFO ] ───*\n\n`;
             balanceMsg += `👤 *User:* ${name}\n`;
@@ -49,6 +51,7 @@ async(conn, mek, m, { from, q, reply }) => {
                         body: "Live Balance Status",
                         sourceUrl: "https://api.srihub.store/",
                         mediaType: 1,
+                        thumbnailUrl: "https://files.catbox.moe/p4b6y6.jpg", // මෙතනට කැමති image එකක් දාන්න
                         renderLargerThumbnail: false
                     }
                 }
@@ -57,8 +60,8 @@ async(conn, mek, m, { from, q, reply }) => {
             await conn.sendMessage(from, { react: { text: "✅", key: m.key } });
 
         } else {
-            // API එකෙන් error එකක් ආවොත් (වැරදි Key එකක් වැනි)
-            return reply(`❌ Error: ${data.message || "Invalid API Key"}`);
+            // API එකෙන් එන නියම Error එක පෙන්වන්න
+            return reply(`❌ දෝෂයක්: ${data.message || "Invalid API Key or API Down"}`);
         }
 
     } catch (e) {
