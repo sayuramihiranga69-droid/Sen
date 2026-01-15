@@ -1,39 +1,41 @@
 const { cmd } = require("../command");
 const axios = require("axios");
 
-const XN_FOOTER = "✫☘ 𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃 𝐗-𝐒𝐄𝐀𝐑𝐂𝐇 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐑 ☢️☘";
+const XN_FOOTER = "✫☘ 𝐗-𝐒𝐄𝐀𝐑𝐂𝐇 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐑 ☢️☘";
 const SRIHUB_KEY = "dew_YyT0KDc2boHDasFlmZCqDcPoeDHReD20aYmEsm1G";
 const SEARCH_API = "https://api.srihub.store/nsfw/xnxxsearch";
 const DOWNLOAD_API = "https://api.srihub.store/nsfw/xnxxdl";
 
-// ───────── Ultra Smart Waiter ─────────
-function waitForReply(conn, from, sender, targetId) {
-    return new Promise((resolve) => {
-        const handler = (update) => {
-            const msg = update.messages?.[0];
-            if (!msg?.message) return;
+/**
+ * Multi-Reply Support Waiter
+ * සෙවුම් ලැයිස්තුවට කිහිප වරක් reply කළ හැකි වන පරිදි සකසා ඇත.
+ */
+function startWaiting(conn, from, sender, targetId, callback) {
+    const handler = async (update) => {
+        const msg = update.messages?.[0];
+        if (!msg?.message) return;
 
-            const text = msg.message.conversation || msg.message?.extendedTextMessage?.text || "";
-            const context = msg.message?.extendedTextMessage?.contextInfo;
-            const msgSender = msg.key.participant || msg.key.remoteJid;
-            
-            const isTargetReply = context?.stanzaId === targetId;
-            const isCorrectUser = msgSender.includes(sender.split('@')[0]) || msgSender.includes("@lid");
+        const text = msg.message.conversation || msg.message?.extendedTextMessage?.text || "";
+        const context = msg.message?.extendedTextMessage?.contextInfo;
+        const msgSender = msg.key.participant || msg.key.remoteJid;
+        
+        const isTargetReply = context?.stanzaId === targetId;
+        const isCorrectUser = msgSender.includes(sender.split('@')[0]) || msgSender.includes("@lid");
 
-            if (msg.key.remoteJid === from && isCorrectUser && isTargetReply && !isNaN(text)) {
-                conn.ev.off("messages.upsert", handler);
-                resolve({ msg, text: text.trim() });
-            }
-        };
-        conn.ev.on("messages.upsert", handler);
-        setTimeout(() => { conn.ev.off("messages.upsert", handler); }, 300000); // 5 Minutes
-    });
+        if (msg.key.remoteJid === from && isCorrectUser && isTargetReply && !isNaN(text)) {
+            // මෙහිදී handler එක off කරන්නේ නැත (එවිට එකම list එකට දිගටම reply කළ හැක)
+            callback({ msg, text: text.trim() });
+        }
+    };
+    conn.ev.on("messages.upsert", handler);
+    // විනාඩි 10 කට පසු ස්වයංක්‍රීයව නතර වේ.
+    setTimeout(() => { conn.ev.off("messages.upsert", handler); }, 600000); 
 }
 
 cmd({
-    pattern: "xnxx2",
+    pattern: "xnxx",
     alias: ["xsearch", "xn"],
-    desc: "Search and download xnxx videos",
+    desc: "Search and download xnxx videos with thumbnail",
     category: "nsfw",
     react: "🔞",
     filename: __filename,
@@ -53,62 +55,60 @@ cmd({
         });
 
         const sentSearch = await conn.sendMessage(from, { 
-            text: listText + `කරුණාකර ඔබට අවශ්‍ය අංකය Reply කරන්න.` 
+            text: listText + `අංකය Reply කරන්න. (ඔබට අවශ්‍ය ඕනෑම අංක ගණනක් මෙයට Reply කළ හැක)` 
         }, { quoted: m });
 
-        // --- ස්වාධීන පාලනය (Search Flow) ---
-        const startFlow = async () => {
-            const selection = await waitForReply(conn, from, sender, sentSearch.key.id);
-            if (!selection) return;
-
+        // සෙවුම් ලැයිස්තුවේ reply handle කිරීම
+        startWaiting(conn, from, sender, sentSearch.key.id, async (selection) => {
             const idx = parseInt(selection.text) - 1;
             const selectedVideo = results[idx];
-            if (!selectedVideo) return reply("❌ වැරදි අංකයකි.");
+            if (!selectedVideo) return;
 
             await conn.sendMessage(from, { react: { text: "⏳", key: selection.msg.key } });
 
             try {
-                // 2. වීඩියෝවේ බාගත කිරීමේ ලින්ක් ලබා ගැනීම
+                // 2. වීඩියෝ ලින්ක් ලබා ගැනීම
                 const dlRes = await axios.get(`${DOWNLOAD_API}?url=${encodeURIComponent(selectedVideo.link)}&apikey=${SRIHUB_KEY}`);
                 const data = dlRes.data?.results;
-
-                if (!data) return reply("❌ බාගත කිරීමේ ලින්ක් ලබා ගත නොහැක.");
+                if (!data) return;
 
                 let qualityText = `🎥 *${data.title}*\n\n` +
                                  `*1.* High Quality (MP4)\n` +
                                  `*2.* Low Quality (3GP)\n\n` +
-                                 `ඔබට අවශ්‍ය ගුණාත්මක භාවයේ (Quality) අංකය Reply කරන්න.`;
+                                 `Quality අංකය Reply කරන්න.`;
 
                 const sentQual = await conn.sendMessage(from, { 
                     image: { url: data.image }, 
                     caption: qualityText 
                 }, { quoted: selection.msg });
 
-                const qSel = await waitForReply(conn, from, sender, sentQual.key.id);
-                if (!qSel) return;
+                // Quality තේරීම සඳහා බලා සිටීම
+                startWaiting(conn, from, sender, sentQual.key.id, async (qSel) => {
+                    const videoUrl = qSel.text === "1" ? data.files.high : data.files.low;
+                    
+                    await conn.sendMessage(from, { react: { text: "📥", key: qSel.msg.key } });
 
-                const videoUrl = qSel.text === "1" ? data.files.high : data.files.low;
-                
-                await conn.sendMessage(from, { react: { text: "📥", key: qSel.msg.key } });
+                    // පින්තූරය buffer එකක් ලෙස ලබා ගැනීම (Thumbnail සඳහා)
+                    const imageBuff = await axios.get(data.image, { responseType: 'arraybuffer' });
+                    const thumbnail = Buffer.from(imageBuff.data, 'utf-8');
 
-                // 3. වීඩියෝව Document එකක් ලෙස යැවීම
-                await conn.sendMessage(from, {
-                    document: { url: videoUrl },
-                    fileName: `${data.title}.mp4`,
-                    mimetype: "video/mp4",
-                    caption: `✅ *Download Complete*\n🎬 *${data.title}*\n\n${XN_FOOTER}`
-                }, { quoted: qSel.msg });
+                    // 3. වීඩියෝව Document එකක් ලෙස යැවීම
+                    await conn.sendMessage(from, {
+                        document: { url: videoUrl },
+                        fileName: `${data.title}.mp4`,
+                        mimetype: "video/mp4",
+                        jpegThumbnail: thumbnail, // මෙතැනින් Thumbnail එක වැටේ
+                        caption: `✅ *Download Complete*\n🎬 *${data.title}*\n\n${XN_FOOTER}`
+                    }, { quoted: qSel.msg });
+                });
 
             } catch (err) {
                 console.error(err);
-                reply("❌ බාගත කිරීමේදී දෝෂයක් සිදු විය.");
             }
-        };
-
-        startFlow();
+        });
 
     } catch (e) {
         console.log(e);
-        reply("❌ පද්ධතියේ දෝෂයක් පවතී.");
+        reply("❌ දෝෂයක් සිදු විය. පසුව උත්සාහ කරන්න.");
     }
 });
