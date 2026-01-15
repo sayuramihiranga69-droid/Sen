@@ -2,7 +2,7 @@ const { cmd } = require("../command");
 const axios = require("axios");
 
 const XN_FOOTER = "✫☘ 𝐗-𝐒𝐄𝐀𝐑𝐂𝐇 𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐄𝐑 ☢️☘";
-const SRIHUB_KEY = "dew_YyT0KDc2boHDasFlmZCqDcPoeDHReD20aYmEsm1G";
+const SRIHUB_KEY = "dew_5H5Dbuh4v7NbkNRmI0Ns2u2ZK240aNnJ9lnYQXR9";
 const SEARCH_API = "https://api.srihub.store/nsfw/xnxxsearch";
 const DOWNLOAD_API = "https://api.srihub.store/nsfw/xnxxdl";
 
