@@ -11,20 +11,24 @@ async function react(conn, jid, key, emoji) {
     try { await conn.sendMessage(jid, { react: { text: emoji, key } }); } catch {}
 }
 
-// ───────── Multi-User Wait for Reply Helper ─────────
+// ───────── Ultra-Secure Multi-User Wait Helper ─────────
 function waitForReply(conn, from, sender, replyToId, timeout = 120000) {
     return new Promise((resolve, reject) => {
         const handler = (update) => {
             const msg = update.messages?.[0];
             if (!msg?.message) return;
 
-            const ctx = msg.message?.extendedTextMessage?.contextInfo;
+            const context = msg.message?.extendedTextMessage?.contextInfo;
             const text = msg.message.conversation || msg.message?.extendedTextMessage?.text;
-            const isReplyToBot = ctx?.stanzaId === replyToId;
-            const isSameUser = msg.key.participant === sender || msg.key.remoteJid === sender;
+            
+            // 🔒 පරීක්ෂාවන් 3 ක්:
+            // 1. මේ මැසේජ් එක රිප්ලයි එකක්ද?
+            // 2. රිප්ලයි කළේ අපි එවපු අදාළ පණිවිඩයටමද? (stanzaId)
+            // 3. රිප්ලයි කළේ ඒ සර්ච් එක කරපු පුද්ගලයාමද? (sender)
+            const isCorrectReply = context?.stanzaId === replyToId;
+            const isCorrectUser = msg.key.participant === sender || msg.key.remoteJid === sender;
 
-            // පටලැවිල්ල වැලැක්වීමට User ID සහ Message ID දෙකම පරීක්ෂා කරයි
-            if (msg.key.remoteJid === from && isReplyToBot && isSameUser) {
+            if (msg.key.remoteJid === from && isCorrectReply && isCorrectUser) {
                 conn.ev.off("messages.upsert", handler);
                 resolve({ msg, text: text ? text.trim() : "" });
             }
@@ -41,13 +45,13 @@ function waitForReply(conn, from, sender, replyToId, timeout = 120000) {
 cmd({
     pattern: "anime",
     alias: ["ac2", "movie"],
-    desc: "Anime/Movie Downloader with Multi-User Support",
+    desc: "Anti-Conflict Anime Downloader",
     category: "downloader",
     react: "⛩️",
     filename: __filename,
 }, async (conn, mek, m, { from, q, reply, sender }) => {
     try {
-        if (!q) return reply("❗ කරුණාකර නමක් සඳහන් කරන්න. (Ex: .anime Demon Slayer)");
+        if (!q) return reply("❗ කරුණාකර නමක් සඳහන් කරන්න.");
         await react(conn, from, m.key, "🔍");
 
         // 1. සෙවීම
@@ -56,23 +60,22 @@ cmd({
         if (!results?.length) return reply("❌ කිසිවක් හමු නොවීය.");
 
         let listText = "⛩️ *𝐀𝐍𝐈𝐌𝐄𝐂𝐋𝐔𝐁𝟐 𝐒𝐄𝐀𝐑𝐂𝐇*\n\n";
-        results.slice(0, 10).forEach((v, i) => { listText += `*${i + 1}.* ${v.title} (${v.type})\n`; });
+        results.slice(0, 10).forEach((v, i) => { listText += `*${i + 1}.* ${v.title}\n`; });
         const listMsg = await conn.sendMessage(from, { text: listText + `\nඅදාළ අංකය Reply කරන්න.\n\n${AC2_FOOTER}` }, { quoted: m });
 
-        // 2. තේරීම
+        // 2. තේරීම (stanzaId පාවිච්චි කර තනි තනියම හඳුනාගනී)
         const { msg: selMsg, text: selText } = await waitForReply(conn, from, sender, listMsg.key.id);
         const index = parseInt(selText) - 1;
         if (isNaN(index) || !results[index]) return reply("❌ වැරදි අංකයක්.");
         await react(conn, from, selMsg.key, "🎬");
 
-        // 3. විස්තර ගැනීම
+        // 3. විස්තර සහ එපිසෝඩ් (සීමාවකින් තොරව සියල්ල)
         const detailsRes = await axios.get(`${API_BASE}?action=details&url=${encodeURIComponent(results[index].link)}`);
         const details = detailsRes.data?.data;
         let downloadUrl = results[index].link;
 
         if (details.is_tv_show && details.episodes) {
             let epText = `📺 *${details.title}*\n\n*Select Episode:*`;
-            // සීමාවකින් තොරව සියලුම එපිසෝඩ් පෙන්වයි
             details.episodes.forEach((ep, i) => { epText += `\n*${i + 1}.* Episode ${ep.ep_num}`; });
             
             const epMsg = await conn.sendMessage(from, { 
@@ -82,7 +85,6 @@ cmd({
 
             const { msg: epSelMsg, text: epSelText } = await waitForReply(conn, from, sender, epMsg.key.id);
             const epIdx = parseInt(epSelText) - 1;
-            if (isNaN(epIdx) || !details.episodes[epIdx]) return reply("❌ වැරදි එපිසෝඩ් අංකයක්.");
             downloadUrl = details.episodes[epIdx].link;
             await react(conn, from, epSelMsg.key, "📥");
         }
@@ -90,19 +92,16 @@ cmd({
         // 4. Quality තේරීම
         const dlRes = await axios.get(`${API_BASE}?action=download&url=${encodeURIComponent(downloadUrl)}`);
         const dlLinks = dlRes.data?.download_links;
-        if (!dlLinks) return reply("❌ ලින්ක්ස් හමු නොවීය.");
-
+        
         let qText = `🎬 *Select Quality:*`;
         dlLinks.forEach((dl, i) => { qText += `\n*${i + 1}.* ${dl.quality}`; });
         const qMsg = await conn.sendMessage(from, { text: qText + `\n\nQuality අංකය Reply කරන්න.` }, { quoted: selMsg });
 
         const { msg: lastMsg, text: lastText } = await waitForReply(conn, from, sender, qMsg.key.id);
         const chosen = dlLinks[parseInt(lastText) - 1];
-        if (!chosen) return reply("❌ වැරදි Quality අංකයක්.");
-        
         await react(conn, from, lastMsg.key, "⏳");
 
-        // 5. SriHub GDrive Bypass (අර 2.5 KB අවුල නැති කිරීමට)
+        // 5. SriHub Bypass හරහා Real File ලබාගැනීම
         const bypassRes = await axios.get(`${SRIHUB_BYPASS_API}?url=${encodeURIComponent(chosen.direct_link)}&apikey=${SRIHUB_KEY}`);
         
         if (bypassRes.data && bypassRes.data.success) {
@@ -115,10 +114,11 @@ cmd({
             }, { quoted: lastMsg });
             await react(conn, from, docMsg.key, "✅");
         } else {
-            reply("❌ Real File එක ලබාගැනීම අසාර්ථකයි. පසුව උත්සාහ කරන්න.");
+            reply("❌ Real File එක ලබාගැනීම අසාර්ථකයි.");
         }
 
     } catch (e) {
+        console.error(e);
         reply("⚠️ දෝෂයක්: " + e.message);
     }
 });
