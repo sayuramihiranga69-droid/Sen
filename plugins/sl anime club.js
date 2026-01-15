@@ -4,7 +4,7 @@ const axios = require("axios");
 const AC2_FOOTER = "✫☘ 𝐀𝐍𝐈𝐌𝐄𝐂𝐋𝐔𝐁𝟐 𝐃𝐋 ☢️☘";
 const API_BASE = "https://sl-anime1.vercel.app/api/handler";
 const SRIHUB_BYPASS_API = "https://api.srihub.store/download/gdrive";
-const SRIHUB_KEY = "dew_B59NylJtdTt6KmCaDpLt5VXWo1aohDRyRblCDlc7";
+const SRIHUB_KEY = "dew_YyT0KDc2boHDasFlmZCqDcPoeDHReD20aYmEsm1G";
 
 // ───────── React helper ─────────
 async function react(conn, jid, key, emoji) {
