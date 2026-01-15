@@ -31,12 +31,24 @@ function waitForReply(conn, from, replyToId, timeout = 120000) {
     });
 }
 
-// ───────── Create Thumbnail ─────────
-async function makeThumbnail(url) {
+// ───────── Get Google Drive Direct Link (Bypass Confirmation) ─────────
+async function getGDriveDirect(url) {
     try {
-        const img = await axios.get(url, { responseType: "arraybuffer", timeout: 15000 });
-        return await sharp(img.data).resize(300).jpeg({ quality: 65 }).toBuffer();
-    } catch (e) { return null; }
+        const response = await axios.get(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            maxRedirects: 5
+        });
+        
+        // පරීක්ෂා කරනවා confirmation එකක් ඉල්ලනවාද කියලා (large files සඳහා)
+        if (response.data.includes('confirm=')) {
+            const confirmToken = response.data.match(/confirm=([a-zA-Z0-9_]+)/)[1];
+            const fileId = url.match(/id=([a-zA-Z0-9_-]+)/)[1];
+            return `https://drive.usercontent.google.com/download?id=${fileId}&confirm=${confirmToken}&export=download`;
+        }
+        return url;
+    } catch (e) {
+        return url;
+    }
 }
 
 // ───────── Command ─────────
@@ -52,7 +64,6 @@ cmd({
         if (!q) return reply("❗ Example: .anime Demon Slayer");
         await react(conn, from, m.key, "🔍");
 
-        // 1️⃣ Search
         const searchRes = await axios.get(`${API_BASE}?action=search&query=${encodeURIComponent(q)}`);
         const results = searchRes.data?.data;
         if (!results?.length) return reply("❌ No results found");
@@ -61,13 +72,9 @@ cmd({
         results.slice(0, 10).forEach((v, i) => { listText += `*${i + 1}.* ${v.title}\n`; });
         const listMsg = await conn.sendMessage(from, { text: listText + `\nReply with number\n\n${AC2_FOOTER}` }, { quoted: m });
 
-        // 2️⃣ Select Anime
-        const { msg: selMsg, text: selText } = await waitForReply(conn, from, listMsg.key.id);
-        const index = parseInt(selText) - 1;
-        if (isNaN(index) || !results[index]) return reply("❌ Invalid number");
-        const selected = results[index];
+        const { text: selText } = await waitForReply(conn, from, listMsg.key.id);
+        const selected = results[parseInt(selText) - 1];
 
-        // 3️⃣ Get Details
         const detailsRes = await axios.get(`${API_BASE}?action=details&url=${encodeURIComponent(selected.link)}`);
         const details = detailsRes.data?.data;
         let downloadUrl = selected.link;
@@ -75,35 +82,30 @@ cmd({
         if (details.is_tv_show) {
             let epText = `📺 *${details.title}*\n\n*Select Episode:*`;
             details.episodes.slice(0, 20).forEach((ep, i) => { epText += `\n*${i + 1}.* Episode ${ep.ep_num}`; });
-            const epMsg = await conn.sendMessage(from, { image: { url: details.image }, caption: epText }, { quoted: selMsg });
-            const { msg: epSelMsg, text: epSelText } = await waitForReply(conn, from, epMsg.key.id);
+            const epMsg = await conn.sendMessage(from, { text: epText }, { quoted: m });
+            const { text: epSelText } = await waitForReply(conn, from, epMsg.key.id);
             downloadUrl = details.episodes[parseInt(epSelText) - 1].link;
         }
 
-        // 4️⃣ Get Qualities
         const dlRes = await axios.get(`${API_BASE}?action=download&url=${encodeURIComponent(downloadUrl)}`);
         const dlLinks = dlRes.data?.download_links;
-        if (!dlLinks) return reply("❌ No links found");
-
+        
         let qText = `🎬 *Select Quality:*`;
         dlLinks.forEach((dl, i) => { qText += `\n*${i + 1}.* ${dl.quality}`; });
-        const qMsg = await conn.sendMessage(from, { text: qText }, { quoted: selMsg });
+        const qMsg = await conn.sendMessage(from, { text: qText }, { quoted: m });
 
-        // 5️⃣ Final Download & Send Document
         const { msg: lastMsg, text: lastText } = await waitForReply(conn, from, qMsg.key.id);
         const chosen = dlLinks[parseInt(lastText) - 1];
         
-        await reply("🚀 Downloading to server... Please wait.");
-        await react(conn, from, lastMsg.key, "⏳");
+        await reply("🚀 Real file එක සකස් කරමින් පවතී... කරුණාකර රැඳී සිටින්න.");
+        
+        // Bypass Google Drive confirmation
+        const finalDownloadLink = await getGDriveDirect(chosen.direct_link);
 
-        const thumb = await makeThumbnail(details.image);
-
-        // ❗ මෙතනදී තමයි Real File එක Stream කරලා යවන්නේ
         await conn.sendMessage(from, {
-            document: { url: chosen.direct_link },
+            document: { url: finalDownloadLink },
             fileName: `${details.title} - ${chosen.quality}.mp4`.replace(/[\/\\:*?"<>|]/g,""),
             mimetype: "video/mp4",
-            jpegThumbnail: thumb || undefined,
             caption: `✅ *Download Complete*\n🎬 *${details.title}*\n💎 *Quality:* ${chosen.quality}\n\n${AC2_FOOTER}`
         }, { quoted: lastMsg });
 
