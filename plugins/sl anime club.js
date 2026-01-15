@@ -1,9 +1,10 @@
 const { cmd } = require("../command");
 const axios = require("axios");
-const sharp = require("sharp");
 
 const AC2_FOOTER = "✫☘ 𝐀𝐍𝐈𝐌𝐄𝐂𝐋𝐔𝐁𝟐 𝐃𝐋 ☢️☘";
 const API_BASE = "https://sl-anime1.vercel.app/api/handler";
+const SRIHUB_BYPASS_API = "https://api.srihub.store/download/gdrive";
+const SRIHUB_KEY = "dew_B59NylJtdTt6KmCaDpLt5VXWo1aohDRyRblCDlc7";
 
 // ───────── React helper ─────────
 async function react(conn, jid, key, emoji) {
@@ -31,31 +32,11 @@ function waitForReply(conn, from, replyToId, timeout = 120000) {
     });
 }
 
-// ───────── Get Google Drive Direct Link (Bypass Confirmation) ─────────
-async function getGDriveDirect(url) {
-    try {
-        const response = await axios.get(url, {
-            headers: { 'User-Agent': 'Mozilla/5.0' },
-            maxRedirects: 5
-        });
-        
-        // පරීක්ෂා කරනවා confirmation එකක් ඉල්ලනවාද කියලා (large files සඳහා)
-        if (response.data.includes('confirm=')) {
-            const confirmToken = response.data.match(/confirm=([a-zA-Z0-9_]+)/)[1];
-            const fileId = url.match(/id=([a-zA-Z0-9_-]+)/)[1];
-            return `https://drive.usercontent.google.com/download?id=${fileId}&confirm=${confirmToken}&export=download`;
-        }
-        return url;
-    } catch (e) {
-        return url;
-    }
-}
-
 // ───────── Command ─────────
 cmd({
     pattern: "anime",
     alias: ["ac2"],
-    desc: "Download Real Video File from AnimeClub2",
+    desc: "Download Real Video File using SriHub Bypass",
     category: "downloader",
     react: "📥",
     filename: __filename,
@@ -64,6 +45,7 @@ cmd({
         if (!q) return reply("❗ Example: .anime Demon Slayer");
         await react(conn, from, m.key, "🔍");
 
+        // 1. සෙවීම
         const searchRes = await axios.get(`${API_BASE}?action=search&query=${encodeURIComponent(q)}`);
         const results = searchRes.data?.data;
         if (!results?.length) return reply("❌ No results found");
@@ -75,6 +57,7 @@ cmd({
         const { text: selText } = await waitForReply(conn, from, listMsg.key.id);
         const selected = results[parseInt(selText) - 1];
 
+        // 2. විස්තර ගැනීම
         const detailsRes = await axios.get(`${API_BASE}?action=details&url=${encodeURIComponent(selected.link)}`);
         const details = detailsRes.data?.data;
         let downloadUrl = selected.link;
@@ -87,6 +70,7 @@ cmd({
             downloadUrl = details.episodes[parseInt(epSelText) - 1].link;
         }
 
+        // 3. Quality ලින්ක්ස් ගැනීම
         const dlRes = await axios.get(`${API_BASE}?action=download&url=${encodeURIComponent(downloadUrl)}`);
         const dlLinks = dlRes.data?.download_links;
         
@@ -97,19 +81,27 @@ cmd({
         const { msg: lastMsg, text: lastText } = await waitForReply(conn, from, qMsg.key.id);
         const chosen = dlLinks[parseInt(lastText) - 1];
         
-        await reply("🚀 Real file එක සකස් කරමින් පවතී... කරුණාකර රැඳී සිටින්න.");
+        await reply("🚀 SriHub හරහා Real Link එක සකස් කරමින් පවතී...");
+        await react(conn, from, lastMsg.key, "⏳");
+
+        // 4. SriHub Bypass API එකෙන් Real Download URL එක ගැනීම
+        const bypassRes = await axios.get(`${SRIHUB_BYPASS_API}?url=${encodeURIComponent(chosen.direct_link)}&apikey=${SRIHUB_KEY}`);
         
-        // Bypass Google Drive confirmation
-        const finalDownloadLink = await getGDriveDirect(chosen.direct_link);
+        if (bypassRes.data && bypassRes.data.success) {
+            const realFile = bypassRes.data.result;
 
-        await conn.sendMessage(from, {
-            document: { url: finalDownloadLink },
-            fileName: `${details.title} - ${chosen.quality}.mp4`.replace(/[\/\\:*?"<>|]/g,""),
-            mimetype: "video/mp4",
-            caption: `✅ *Download Complete*\n🎬 *${details.title}*\n💎 *Quality:* ${chosen.quality}\n\n${AC2_FOOTER}`
-        }, { quoted: lastMsg });
+            // 5. Real File එක Document එකක් විදිහට යැවීම
+            await conn.sendMessage(from, {
+                document: { url: realFile.downloadUrl },
+                fileName: realFile.fileName,
+                mimetype: realFile.mimetype,
+                caption: `✅ *Download Complete*\n🎬 *${details.title}*\n💎 *Quality:* ${chosen.quality}\n⚖️ *Size:* ${realFile.fileSize}\n\n${AC2_FOOTER}`
+            }, { quoted: lastMsg });
 
-        await react(conn, from, lastMsg.key, "✅");
+            await react(conn, from, lastMsg.key, "✅");
+        } else {
+            reply("❌ Real link එක ලබාගැනීමට නොහැකි වුණා. පසුව උත්සාහ කරන්න.");
+        }
 
     } catch (e) {
         reply("⚠️ Error: " + e.message);
