@@ -1,4 +1,4 @@
-const { cmd } = require('../lib/command'); 
+const { cmd } = require('../command'); 
 
 cmd({
     pattern: "jid2",
