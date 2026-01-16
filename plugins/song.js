@@ -4,7 +4,7 @@ const yts = require("yt-search");
 
 const FOOTER = "🎧 𝐒𝐀𝐘𝐔𝐑𝐀 𝐒𝐎𝐔𝐍𝐃 𝐒𝐘𝐒𝐓𝐄𝐌 🎧";
 
-// ───────── Smart Waiter ─────────
+// ───────── Smart Waiter (Reply එක එනකම් බලා සිටීම) ─────────
 function waitForReply(conn, from, sender, targetId) {
     return new Promise((resolve) => {
         const handler = (update) => {
@@ -31,14 +31,15 @@ function waitForReply(conn, from, sender, targetId) {
 cmd({
     pattern: "song",
     alias: ["audio", "ytsong"],
-    desc: "YouTube Music Downloader (Reply System)",
+    desc: "YouTube Music Downloader (Direct Reply System)",
     category: "downloader",
     react: "🎧",
     filename: __filename,
-}, async (conn, mek, m, { from, q, reply, sender, prefix }) => {
+}, async (conn, mek, m, { from, q, reply, sender }) => {
     try {
-        if (!q) return reply("❗ කරුණාකර සින්දුවේ නම හෝ Link එකක් ලබා දෙන්න.");
+        if (!q) return reply("❗ කරුණාකර සින්දුවේ නම හෝ YouTube Link එකක් ලබා දෙන්න.");
 
+        // 1. YouTube Search
         const searchRes = await yts(q);
         const results = searchRes.videos.slice(0, 10);
         if (!results?.length) return reply("❌ කිසිවක් හමු නොවීය.");
@@ -49,55 +50,59 @@ cmd({
         });
 
         const sentMsg = await conn.sendMessage(from, { 
-            text: listText + `\nඅවශ්‍ය සින්දුවේ අංකය Reply කරන්න.` 
+            text: listText + `\nඅංකය Reply කරන්න.` 
         }, { quoted: m });
 
+        // 2. Selection Handling
         const selection = await waitForReply(conn, from, sender, sentMsg.key.id);
         if (!selection) return;
 
         const idx = parseInt(selection.text) - 1;
         const selectedVideo = results[idx];
-        if (!selectedVideo) return reply("❌ වැරදි අංකයකි. කරුණාකර ලැයිස්තුවේ ඇති අංකයක් ලබා දෙන්න.");
+        if (!selectedVideo) return reply("❌ වැරදි අංකයකි.");
 
         await conn.sendMessage(from, { react: { text: "⏳", key: selection.msg.key } });
 
-        // API Request එකට timeout එකක් සහ error handling එකතු කර ඇත
+        // 3. API Request (ඔබේ API එක මෙතැනදී ක්‍රියාත්මක වේ)
         const apiUrl = `https://api-dark-shan-yt.koyeb.app/download/ytmp3?url=${encodeURIComponent(selectedVideo.url)}&apikey=edbcfabbca5a9750`;
         
         try {
-            const res = await axios.get(apiUrl, { timeout: 60000 }); // තත්පර 60ක කාලයක් ලබා දීම
+            // API එකට response එක දෙන්න තත්පර 60ක් (60000ms) ලබා දෙමු
+            const res = await axios.get(apiUrl, { timeout: 60000 });
 
-            if (!res.data || !res.data.status || !res.data.data.download) {
-                return reply("❌ API එකෙන් සින්දුව ලබා ගැනීමට නොහැකි විය. කරුණාකර නැවත උත්සාහ කරන්න.");
+            if (res.data && res.data.status === true) {
+                const downloadUrl = res.data.data.download;
+                const title = res.data.data.title;
+
+                // 4. සින්දුව Audio File එකක් ලෙස යැවීම
+                await conn.sendMessage(from, {
+                    audio: { url: downloadUrl },
+                    mimetype: "audio/mpeg",
+                    fileName: `${title}.mp3`,
+                    contextInfo: {
+                        externalAdReply: {
+                            title: title,
+                            body: FOOTER,
+                            thumbnailUrl: selectedVideo.thumbnail,
+                            sourceUrl: selectedVideo.url,
+                            mediaType: 1,
+                            renderLargerThumbnail: true
+                        }
+                    }
+                }, { quoted: selection.msg });
+
+                await conn.sendMessage(from, { react: { text: "✅", key: selection.msg.key } });
+            } else {
+                reply("❌ API එකෙන් දත්ත ලබා ගැනීමට නොහැකි විය.");
             }
 
-            const downloadUrl = res.data.data.download;
-
-            await conn.sendMessage(from, {
-                audio: { url: downloadUrl },
-                mimetype: "audio/mpeg",
-                fileName: `${selectedVideo.title}.mp3`,
-                contextInfo: {
-                    externalAdReply: {
-                        title: selectedVideo.title,
-                        body: FOOTER,
-                        thumbnailUrl: selectedVideo.thumbnail,
-                        sourceUrl: selectedVideo.url,
-                        mediaType: 1,
-                        showAdAttribution: true
-                    }
-                }
-            }, { quoted: selection.msg });
-
-            await conn.sendMessage(from, { react: { text: "✅", key: selection.msg.key } });
-
-        } catch (apiError) {
-            console.error("API Error:", apiError.message);
-            reply("❌ API සබඳතාවයේ දෝෂයකි. (Timeout හෝ Server Down)");
+        } catch (apiErr) {
+            console.error(apiErr);
+            reply("❌ සර්වර් එකේ ප්‍රමාදයක් පවතී. කරුණාකර නැවත උත්සාහ කරන්න.");
         }
 
     } catch (e) {
-        console.error("Global Error:", e);
-        reply("❌ පද්ධතියේ දෝෂයක් සිදු විය.");
+        console.error(e);
+        reply("❌ දෝෂයක් සිදු විය.");
     }
 });
