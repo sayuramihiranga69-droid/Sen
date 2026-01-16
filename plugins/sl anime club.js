@@ -31,7 +31,7 @@ function waitForReply(conn, from, sender, targetId) {
 }
 
 cmd({
-    pattern: "slanimeclub",
+    pattern: "anime",
     alias: ["ac2", "movie"],
     desc: "Ultimate Multi-Reply Downloader",
     category: "downloader",
