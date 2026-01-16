@@ -1,7 +1,7 @@
 const { cmd } = require('../command');
 
 malvin({
-    pattern: "jid",
+    pattern: "jidt",
     alias: ["id", "chatid", "gjid"],  
     desc: "Get full JID of current chat/user (Creator Only)",
     react: "🆔",
