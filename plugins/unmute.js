@@ -15,16 +15,23 @@ cmd({
       }, { quoted: message });
     }
 
-    // Download the media
+    // --- FIX FOR STATUS/UNDEFINED TYPES ---
+    // Extract the actual message content if it's wrapped (common in Status updates)
+    let quotedMsg = match.quoted.message || match.quoted;
+    
+    // Resolve mtype manually if match.quoted.mtype is undefined
+    let mtype = match.quoted.mtype || Object.keys(quotedMsg)[0];
+
+    // Handle View Once wrappers
+    if (mtype === 'viewOnceMessageV2' || mtype === 'viewOnceMessage') {
+        quotedMsg = quotedMsg[mtype].message;
+        mtype = Object.keys(quotedMsg)[0];
+    }
+    // ---------------------------------------
+
     const buffer = await match.quoted.download();
-    let mtype = match.quoted.mtype;
     const caption = match.quoted.text || "";
     const target = sender; 
-
-    // Handle View Once Messages (often the cause of 'not supported' errors)
-    if (mtype === 'viewOnceMessageV2' || mtype === 'viewOnceMessage') {
-        mtype = Object.keys(match.quoted.message)[0];
-    }
 
     let messageContent = {};
 
@@ -52,20 +59,11 @@ cmd({
             fileName: match.quoted.fileName || 'file' 
         };
         break;
-      // Added support for Contact and Location just in case
-      case "contactMessage":
-        messageContent = { contacts: { displayName: match.quoted.displayName, contacts: [match.quoted.vcard] } };
-        break;
-      case "locationMessage":
-        messageContent = { location: { degreesLatitude: match.quoted.lat, degreesLongitude: match.quoted.lng } };
-        break;
       case "conversation":
       case "extendedTextMessage":
-        messageContent = { text: match.quoted.text };
+        messageContent = { text: match.quoted.text || quotedMsg[mtype]?.text || quotedMsg[mtype] };
         break;
       default:
-        // Log the unknown type to console so you can identify it
-        console.log("Unknown mtype:", mtype);
         return await client.sendMessage(from, {
           text: `❌ This message type (${mtype}) is not supported yet.`
         }, { quoted: message });
