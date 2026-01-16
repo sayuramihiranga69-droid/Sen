@@ -4,7 +4,7 @@ const yts = require("yt-search");
 
 const FOOTER = "🎧 𝐒𝐀𝐘𝐔𝐑𝐀 𝐒𝐎𝐔𝐍𝐃 𝐒𝐘𝐒𝐓𝐄𝐌 🎧";
 
-// ───────── Smart Waiter (Reply බලාපොරොත්තුවෙන් සිටීම) ─────────
+// ───────── Smart Waiter ─────────
 function waitForReply(conn, from, sender, targetId) {
     return new Promise((resolve) => {
         const handler = (update) => {
@@ -24,7 +24,7 @@ function waitForReply(conn, from, sender, targetId) {
             }
         };
         conn.ev.on("messages.upsert", handler);
-        setTimeout(() => { conn.ev.off("messages.upsert", handler); }, 180000); // විනාඩි 3 ක කාලයක්
+        setTimeout(() => { conn.ev.off("messages.upsert", handler); resolve(null); }, 180000); 
     });
 }
 
@@ -37,9 +37,8 @@ cmd({
     filename: __filename,
 }, async (conn, mek, m, { from, q, reply, sender, prefix }) => {
     try {
-        if (!q) return reply("❗ කරුණාකර සින්දුවේ නම හෝ YouTube Link එකක් ලබා දෙන්න.");
+        if (!q) return reply("❗ කරුණාකර සින්දුවේ නම හෝ Link එකක් ලබා දෙන්න.");
 
-        // 1. YouTube Search - වීඩියෝ කිහිපයක් සෙවීම
         const searchRes = await yts(q);
         const results = searchRes.videos.slice(0, 10);
         if (!results?.length) return reply("❌ කිසිවක් හමු නොවීය.");
@@ -53,38 +52,52 @@ cmd({
             text: listText + `\nඅවශ්‍ය සින්දුවේ අංකය Reply කරන්න.` 
         }, { quoted: m });
 
-        // 2. පරිශීලකයාගේ Reply එක ලබා ගැනීම
         const selection = await waitForReply(conn, from, sender, sentMsg.key.id);
         if (!selection) return;
 
         const idx = parseInt(selection.text) - 1;
         const selectedVideo = results[idx];
-        if (!selectedVideo) return reply("❌ වැරදි අංකයකි.");
+        if (!selectedVideo) return reply("❌ වැරදි අංකයකි. කරුණාකර ලැයිස්තුවේ ඇති අංකයක් ලබා දෙන්න.");
 
-        // Reaction එකක් දැමීම
         await conn.sendMessage(from, { react: { text: "⏳", key: selection.msg.key } });
 
-        // 3. API එක හරහා Download Link ලබා ගැනීම
+        // API Request එකට timeout එකක් සහ error handling එකතු කර ඇත
         const apiUrl = `https://api-dark-shan-yt.koyeb.app/download/ytmp3?url=${encodeURIComponent(selectedVideo.url)}&apikey=edbcfabbca5a9750`;
-        const res = await axios.get(apiUrl);
+        
+        try {
+            const res = await axios.get(apiUrl, { timeout: 60000 }); // තත්පර 60ක කාලයක් ලබා දීම
 
-        if (!res.data.status) return reply("❌ Download Link ලබා ගැනීමට නොහැකි විය.");
+            if (!res.data || !res.data.status || !res.data.data.download) {
+                return reply("❌ API එකෙන් සින්දුව ලබා ගැනීමට නොහැකි විය. කරුණාකර නැවත උත්සාහ කරන්න.");
+            }
 
-        const downloadUrl = res.data.data.download;
-        const title = selectedVideo.title;
+            const downloadUrl = res.data.data.download;
 
-        // 4. සින්දුව Audio එකක් ලෙස යැවීම
-        await conn.sendMessage(from, {
-            audio: { url: downloadUrl },
-            mimetype: "audio/mpeg",
-            fileName: `${title}.mp3`
-        }, { quoted: selection.msg });
+            await conn.sendMessage(from, {
+                audio: { url: downloadUrl },
+                mimetype: "audio/mpeg",
+                fileName: `${selectedVideo.title}.mp3`,
+                contextInfo: {
+                    externalAdReply: {
+                        title: selectedVideo.title,
+                        body: FOOTER,
+                        thumbnailUrl: selectedVideo.thumbnail,
+                        sourceUrl: selectedVideo.url,
+                        mediaType: 1,
+                        showAdAttribution: true
+                    }
+                }
+            }, { quoted: selection.msg });
 
-        // Reaction එක වෙනස් කිරීම
-        await conn.sendMessage(from, { react: { text: "✅", key: selection.msg.key } });
+            await conn.sendMessage(from, { react: { text: "✅", key: selection.msg.key } });
+
+        } catch (apiError) {
+            console.error("API Error:", apiError.message);
+            reply("❌ API සබඳතාවයේ දෝෂයකි. (Timeout හෝ Server Down)");
+        }
 
     } catch (e) {
-        console.error(e);
-        reply("❌ දෝෂයක් සිදු විය.");
+        console.error("Global Error:", e);
+        reply("❌ පද්ධතියේ දෝෂයක් සිදු විය.");
     }
 });
