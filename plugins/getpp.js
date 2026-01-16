@@ -12,73 +12,50 @@ cmd({
 },
 async (conn, mek, m, context) => {
     try {
-        // Extract context variables
-        const {
-            from,
-            prefix,
-            l,
-            quoted,
-            body,
-            isCmd,
-            command,
-            args,
-            q,
-            isGroup,
-            sender,
-            senderNumber,
-            botNumber2,
-            botNumber,
-            pushname,
-            isMe,
-            isOwner,
-            groupMetadata,
-            groupName,
-            participants,
-            groupAdmins,
-            isBotAdmins,
-            isAdmins,
-            reply
-        } = context;
+        const { from, quoted, args, isOwner, reply } = context;
 
         // Owner check
         if (!isOwner) return reply("🛑 This command is only for the bot owner!");
 
-        // Input sanitization
-        const input = args[0] || (quoted && quoted.sender?.split("@")[0]) || (m.mentionedJid && m.mentionedJid[0]?.split("@")[0]);
-        if (!input || !/^\d{5,15}$/.test(input.replace(/[^0-9]/g, ""))) {
+        // 1. Input එක ගන්නවා (args, quoted හෝ mention වලින්)
+        let input = q || (quoted && quoted.sender) || (m.mentionedJid && m.mentionedJid[0]);
+
+        if (!input && args.length > 0) {
+            input = args.join(""); // හිස්තැන් අයින් කරලා අංක ටික එකතු කරනවා
+        }
+
+        if (!input) {
             return reply("📱 Please provide a valid phone number, mention a user, or reply to a message.\nExample: `.getpp 94763513529`");
         }
 
-        const targetJid = input.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
-        let ppUrl;
-        let userName = targetJid.split("@")[0];
+        // 2. අංකයෙන් ඉලක්කම් විතරක් වෙන් කරලා ගන්නවා (හිස්තැන්, +, - ඔක්කොම අයින් වෙනවා)
+        const cleanNumber = input.replace(/[^0-9]/g, "");
 
-        // Fetch profile picture
+        if (cleanNumber.length < 5 || cleanNumber.length > 15) {
+            return reply("❌ Invalid phone number format! Please check the number again.");
+        }
+
+        const targetJid = cleanNumber + "@s.whatsapp.net";
+        let ppUrl;
+
+        // 3. Profile picture එක Fetch කරනවා
         try {
             ppUrl = await conn.profilePictureUrl(targetJid, "image");
-        } catch {
-            return reply("🖼️ This user has no profile picture or it cannot be accessed!");
+        } catch (e) {
+            return reply("🖼️ This user has no profile picture or it is hidden by privacy settings!");
         }
 
-        // Get contact name
-        try {
-            const contact = await conn.getContact(targetJid);
-            userName = contact.notify || contact.vname || userName;
-        } catch {
-            // No name available
-        }
-
-        // Send profile picture
+        // 4. සාර්ථකව Send කරනවා
         await conn.sendMessage(from, {
             image: { url: ppUrl },
-            caption: `📌 Profile picture of ${userName}`
-        });
+            caption: `✅ *SAYURA MD GETPP*\n\n👤 *User:* ${cleanNumber}\n📌 *Status:* Successfully Fetched`
+        }, { quoted: mek });
 
         // React success
         await conn.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
     } catch (e) {
-        context.reply("🛑 An error occurred while fetching the profile picture! Please try again later.");
-        context.l("❌ Error in getpp:", e);
+        reply("🛑 An error occurred while fetching the profile picture!");
+        console.log("❌ Error in getpp:", e);
     }
 });
