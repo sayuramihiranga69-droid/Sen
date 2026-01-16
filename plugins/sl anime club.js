@@ -31,7 +31,7 @@ function waitForReply(conn, from, sender, targetId) {
 }
 
 cmd({
-    pattern: "slanimeclub",
+    pattern: "anime",
     alias: ["ac2", "movie"],
     desc: "Ultimate Multi-Reply Downloader",
     category: "downloader",
@@ -69,7 +69,7 @@ cmd({
                         // 📺 Episode List එක එවයි
                         let epText = `📺 *${details.title}*\n\n*Select Episode:*`;
                         details.episodes.forEach((ep, i) => { epText += `\n*${i + 1}.* Episode ${ep.ep_num}`; });
-                        const sentEp = await conn.sendMessage(from, { image: { url: details.image }, caption: epText + `\n\nඑපිසෝඩ් අංකය එවන්න. (SAYURA MIHIRANGA🌐)` }, { quoted: animeSelection.msg });
+                        const sentEp = await conn.sendMessage(from, { image: { url: details.image }, caption: epText + `\n\nඑපිසෝඩ් අංකය එවන්න. (කිහිපයක් වුවද තේරිය හැක)` }, { quoted: animeSelection.msg });
 
                         // --- ස්වාධීන එපිසෝඩ් පාලනය (Episode List) ---
                         const startEpFlow = async () => {
@@ -128,10 +128,6 @@ cmd({
         startSearchFlow();
 
     } catch (e) {
-        console.log(e);
-    }
-});
-ch (e) {
         console.log(e);
     }
 });
