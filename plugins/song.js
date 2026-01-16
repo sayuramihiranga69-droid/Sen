@@ -4,7 +4,7 @@ const yts = require("yt-search");
 
 const FOOTER = "🎧 𝐒𝐀𝐘𝐔𝐑𝐀 𝐒𝐎𝐔𝐍𝐃 𝐒𝐘𝐒𝐓𝐄𝐌 🎧";
 
-// ───────── Smart Waiter (Reply එක එනකම් බලා සිටීම) ─────────
+// ───────── Smart Waiter (Reply එක එනතෙක් රැඳී සිටීම) ─────────
 function waitForReply(conn, from, sender, targetId) {
     return new Promise((resolve) => {
         const handler = (update) => {
@@ -24,7 +24,10 @@ function waitForReply(conn, from, sender, targetId) {
             }
         };
         conn.ev.on("messages.upsert", handler);
-        setTimeout(() => { conn.ev.off("messages.upsert", handler); resolve(null); }, 180000); 
+        setTimeout(() => { 
+            conn.ev.off("messages.upsert", handler); 
+            resolve(null); 
+        }, 300000); // විනාඩි 5ක් දක්වා රැඳී සිටී
     });
 }
 
@@ -39,7 +42,7 @@ cmd({
     try {
         if (!q) return reply("❗ කරුණාකර සින්දුවේ නම හෝ YouTube Link එකක් ලබා දෙන්න.");
 
-        // 1. YouTube Search
+        // 1. YouTube එකේ සින්දුව සෙවීම
         const searchRes = await yts(q);
         const results = searchRes.videos.slice(0, 10);
         if (!results?.length) return reply("❌ කිසිවක් හමු නොවීය.");
@@ -53,7 +56,7 @@ cmd({
             text: listText + `\nඅංකය Reply කරන්න.` 
         }, { quoted: m });
 
-        // 2. Selection Handling
+        // 2. පරිශීලකයා අංකය එවන තෙක් රැඳී සිටීම
         const selection = await waitForReply(conn, from, sender, sentMsg.key.id);
         if (!selection) return;
 
@@ -63,46 +66,46 @@ cmd({
 
         await conn.sendMessage(from, { react: { text: "⏳", key: selection.msg.key } });
 
-        // 3. API Request (ඔබේ API එක මෙතැනදී ක්‍රියාත්මක වේ)
+        // 3. API එක හරහා Download Link ලබා ගැනීම
         const apiUrl = `https://api-dark-shan-yt.koyeb.app/download/ytmp3?url=${encodeURIComponent(selectedVideo.url)}&apikey=edbcfabbca5a9750`;
         
-        try {
-            // API එකට response එක දෙන්න තත්පර 60ක් (60000ms) ලබා දෙමු
-            const res = await axios.get(apiUrl, { timeout: 60000 });
+        // Axios සඳහා timeout එක තත්පර 120 දක්වා වැඩි කරන ලදී
+        const res = await axios.get(apiUrl, { timeout: 120000 });
 
-            if (res.data && res.data.status === true) {
-                const downloadUrl = res.data.data.download;
-                const title = res.data.data.title;
-
-                // 4. සින්දුව Audio File එකක් ලෙස යැවීම
-                await conn.sendMessage(from, {
-                    audio: { url: downloadUrl },
-                    mimetype: "audio/mpeg",
-                    fileName: `${title}.mp3`,
-                    contextInfo: {
-                        externalAdReply: {
-                            title: title,
-                            body: FOOTER,
-                            thumbnailUrl: selectedVideo.thumbnail,
-                            sourceUrl: selectedVideo.url,
-                            mediaType: 1,
-                            renderLargerThumbnail: true
-                        }
+        if (res.data && res.data.status) {
+            const dlData = res.data.data;
+            
+            // 4. සින්දුව Audio File එකක් ලෙස යැවීම
+            await conn.sendMessage(from, {
+                audio: { url: dlData.download },
+                mimetype: "audio/mpeg",
+                fileName: `${dlData.title}.mp3`,
+                contextInfo: {
+                    externalAdReply: {
+                        title: dlData.title,
+                        body: FOOTER,
+                        thumbnailUrl: selectedVideo.thumbnail,
+                        sourceUrl: selectedVideo.url,
+                        mediaType: 1,
+                        showAdAttribution: true,
+                        renderLargerThumbnail: true
                     }
-                }, { quoted: selection.msg });
+                }
+            }, { quoted: selection.msg });
 
-                await conn.sendMessage(from, { react: { text: "✅", key: selection.msg.key } });
-            } else {
-                reply("❌ API එකෙන් දත්ත ලබා ගැනීමට නොහැකි විය.");
-            }
+            await conn.sendMessage(from, { react: { text: "✅", key: selection.msg.key } });
 
-        } catch (apiErr) {
-            console.error(apiErr);
-            reply("❌ සර්වර් එකේ ප්‍රමාදයක් පවතී. කරුණාකර නැවත උත්සාහ කරන්න.");
+        } else {
+            await reply("❌ API එකෙන් දත්ත ලබා ගැනීමට නොහැකි විය. කරුණාකර නැවත උත්සාහ කරන්න.");
         }
 
     } catch (e) {
-        console.error(e);
-        reply("❌ දෝෂයක් සිදු විය.");
+        console.error("Error in song command:", e);
+        // Timeout දෝෂයක් නම් පමණක් විශේෂ පණිවිඩයක් පෙන්වයි
+        if (e.code === 'ECONNABORTED') {
+            reply("❌ සර්වර් එකේ ප්‍රමාදයක් පවතී. කරුණාකර මද වේලාවකින් නැවත උත්සාහ කරන්න.");
+        } else {
+            reply("❌ දෝෂයක් සිදු විය. කරුණාකර ඔබ ලබා දුන් Link එක පරීක්ෂා කරන්න.");
+        }
     }
 });
