@@ -72,7 +72,7 @@ cmd({
     await client.sendMessage(target, messageContent);
     
     if (target === sender && from !== sender) {
-        await client.sendMessage(from, { text: "_Sent to your Inbox! ✅_" }, { quoted: message });
+        await client.sendMessage(from, { text: "_Sent to your Sayura Md Inbox! ✅_" }, { quoted: message });
     }
 
   } catch (error) {
