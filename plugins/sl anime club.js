@@ -4,7 +4,7 @@ const axios = require("axios");
 const AC2_FOOTER = "✫☘ 𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌𝐄 ☢️☘";
 const API_BASE = "https://sl-anime1.vercel.app/api/handler";
 const SRIHUB_BYPASS_API = "https://api.srihub.store/download/gdrive";
-const SRIHUB_KEY = "dew_YyT0KDc2boHDasFlmZCqDcPoeDHReD20aYmEsm1G";
+const SRIHUB_KEY = "dew_5H5Dbuh4v7NbkNRmI0Ns2u2ZK240aNnJ9lnYQXR9";
 
 // ───────── Ultra Smart Waiter ─────────
 function waitForReply(conn, from, sender, targetId) {
@@ -31,7 +31,7 @@ function waitForReply(conn, from, sender, targetId) {
 }
 
 cmd({
-    pattern: "anime",
+    pattern: "slanimeclub",
     alias: ["ac2", "movie"],
     desc: "Ultimate Multi-Reply Downloader",
     category: "downloader",
@@ -69,7 +69,7 @@ cmd({
                         // 📺 Episode List එක එවයි
                         let epText = `📺 *${details.title}*\n\n*Select Episode:*`;
                         details.episodes.forEach((ep, i) => { epText += `\n*${i + 1}.* Episode ${ep.ep_num}`; });
-                        const sentEp = await conn.sendMessage(from, { image: { url: details.image }, caption: epText + `\n\nඑපිසෝඩ් අංකය එවන්න. (කිහිපයක් වුවද තේරිය හැක)` }, { quoted: animeSelection.msg });
+                        const sentEp = await conn.sendMessage(from, { image: { url: details.image }, caption: epText + `\n\nඑපිසෝඩ් අංකය එවන්න. (SAYURA MIHIRANGA🌐)` }, { quoted: animeSelection.msg });
 
                         // --- ස්වාධීන එපිසෝඩ් පාලනය (Episode List) ---
                         const startEpFlow = async () => {
@@ -128,6 +128,10 @@ cmd({
         startSearchFlow();
 
     } catch (e) {
+        console.log(e);
+    }
+});
+ch (e) {
         console.log(e);
     }
 });
