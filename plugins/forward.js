@@ -1,47 +1,62 @@
-const { readEnv } = require('../lib/database');
 const { cmd } = require('../command');
-const config = require('../config');
 
 cmd({
-    pattern: "forward",
-    desc: "Forward messages to a specific JID",
-    alias: ["fo"],
-    category: "owner",
-    use: '.forward <JID>',
+    pattern: "jid",
+    desc: "Show full JID information including names and types",
+    category: "other",
+    react: "🔍",
     filename: __filename
 },
-async (conn, mek, m, { from, q, isOwner, reply, quoted }) => {
+async (conn, mek, m, { from, quoted, reply, sender, pushname }) => {
     try {
-        // 1. Owner check
-        if (!isOwner) return reply("*🛑 Owner Only!*");
+        const remoteJid = from;
+        const isGroup = m.isGroup;
+        
+        // 1. LID (Business ID) පිරිසිදු කරගැනීමේ Logic එක
+        const cleanJid = (id) => {
+            if (!id) return id;
+            // :1 හෝ @lid තිබේ නම් ඒවා ඉවත් කර @s.whatsapp.net ලබා දීම
+            if (id.includes(':')) return id.split(':')[0] + "@s.whatsapp.net";
+            if (id.includes('@lid')) return id.split('@')[0] + "@s.whatsapp.net";
+            return id;
+        };
 
-        // 2. මැසේජ් එකක් Reply කරලා තියෙනවද සහ JID එකක් දීලා තියෙනවද කියා බැලීම
-        if (!m.quoted) return reply("*❌ කරුණාකර Forward කළ යුතු මැසේජ් එකට Reply කරන්න.*");
-        if (!q) return reply("*❌ කරුණාකර Forward කළ යුතු JID ලිපිනය ලබා දෙන්න.*");
+        // 2. Sender සහ Bot JID ලබා ගැනීම
+        const senderJid = cleanJid(m.quoted ? m.quoted.sender : sender);
+        const botJid = cleanJid(conn.user.id);
 
-        await conn.sendMessage(from, { react: { text: "⏳", key: mek.key } });
+        let groupName = "N/A";
+        let senderDisplayName = m.quoted ? "Quoted User" : pushname;
 
-        // 3. පිරිසිදු JID එකක් සකසා ගැනීම
-        let targetJid = q.trim();
-        if (!targetJid.includes('@')) {
-            targetJid = targetJid + "@s.whatsapp.net";
+        // 3. Group එකක් නම් Metadata ලබා ගැනීම
+        if (isGroup) {
+            const metadata = await conn.groupMetadata(remoteJid);
+            groupName = metadata.subject || "Unnamed Group";
         }
 
-        // 4. මැසේජ් එක Forward (Copy) කිරීම
-        // මෙතනදී copyNForward පාවිච්චි කිරීමෙන් caption සහ media ඔක්කොම යයි
-        await conn.copyNForward(targetJid, m.quoted, true);
+        // 4. පණිවිඩය සැකසීම
+        const fullText = `🔍 *𝐉𝐈𝐃 𝐅𝐔𝐋𝐋 𝐃𝐄𝐓𝐀𝐈𝐋𝐒*
 
-        // 5. සාර්ථක බව පෙන්වන ලස්සන UI එක
-        let successMsg = `🚀 *𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃 𝐅𝐎𝐑𝐖𝐀𝐑𝐃𝐄𝐑* 🚀\n\n`;
-        successMsg += `📦 *Status:* Successfully Forwarded\n`;
-        successMsg += `🎯 *Target JID:* \`${targetJid}\` \n\n`;
-        successMsg += `*ᴘᴏᴡᴇrd ʙʏ sᴀyura ᴍd*`;
+🏢 *Group Name:* ${isGroup ? groupName : "❌ Not a Group"}
+🆔 *Group JID:* \`${isGroup ? remoteJid : "❌"}\`
 
-        await reply(successMsg);
-        await conn.sendMessage(from, { react: { text: "✅", key: mek.key } });
+👤 *User:* ${senderDisplayName}
+🆔 *User JID:* \`${senderJid}\`
 
-    } catch (e) {
-        console.error("Forward Error:", e);
-        reply(`❌ *Forward කිරීමේදී දෝෂයක් සිදු විය!* \n\nපොඩ්ඩක් බලන්න ඔයා දුන්න JID එක (\`${q}\`) නිවැරදිද කියලා. LID address වලට (Business IDs) සමහර වෙලාවට මැසේජ් යවන්න බෑ.`);
+🤖 *Bot JID:* \`${botJid}\`
+
+💬 *Chat Type:* ${isGroup ? "Group Chat" : "Private Chat"}
+🕐 *Message ID:* \`${m.key.id}\`
+
+*ᴘᴏᴡᴇරෙඩ් ʙʏ sᴀයූරා ᴍඩී*`;
+
+        // 5. මැසේජ් එක යැවීම
+        await conn.sendMessage(from, {
+            text: fullText
+        }, { quoted: mek });
+
+    } catch (err) {
+        console.error("Error in .jid command:", err);
+        reply("❌ Error getting JID info!");
     }
 });
