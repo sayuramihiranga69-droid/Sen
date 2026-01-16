@@ -9,24 +9,25 @@ cmd({
   filename: __filename
 }, async (client, message, match, { from, sender }) => {
   try {
-    // 1. Check if a message is quoted
     if (!match.quoted) {
       return await client.sendMessage(from, {
         text: "*🍁 Please reply to a message (image, video, audio, or doc)!*"
       }, { quoted: message });
     }
 
-    // 2. Download the media
+    // Download the media
     const buffer = await match.quoted.download();
-    const mtype = match.quoted.mtype;
+    let mtype = match.quoted.mtype;
     const caption = match.quoted.text || "";
-    
-    // Determine where to send: 'sender' sends to user's DM, 'from' sends to current chat
     const target = sender; 
+
+    // Handle View Once Messages (often the cause of 'not supported' errors)
+    if (mtype === 'viewOnceMessageV2' || mtype === 'viewOnceMessage') {
+        mtype = Object.keys(match.quoted.message)[0];
+    }
 
     let messageContent = {};
 
-    // 3. Handle different message types
     switch (mtype) {
       case "imageMessage":
         messageContent = { image: buffer, caption };
@@ -51,20 +52,27 @@ cmd({
             fileName: match.quoted.fileName || 'file' 
         };
         break;
+      // Added support for Contact and Location just in case
+      case "contactMessage":
+        messageContent = { contacts: { displayName: match.quoted.displayName, contacts: [match.quoted.vcard] } };
+        break;
+      case "locationMessage":
+        messageContent = { location: { degreesLatitude: match.quoted.lat, degreesLongitude: match.quoted.lng } };
+        break;
       case "conversation":
       case "extendedTextMessage":
         messageContent = { text: match.quoted.text };
         break;
       default:
+        // Log the unknown type to console so you can identify it
+        console.log("Unknown mtype:", mtype);
         return await client.sendMessage(from, {
-          text: "❌ This message type is not supported yet."
+          text: `❌ This message type (${mtype}) is not supported yet.`
         }, { quoted: message });
     }
 
-    // 4. Send the message
     await client.sendMessage(target, messageContent);
     
-    // 5. Optional: Confirm to the group that it was sent to DM
     if (target === sender && from !== sender) {
         await client.sendMessage(from, { text: "_Sent to your Inbox! ✅_" }, { quoted: message });
     }
