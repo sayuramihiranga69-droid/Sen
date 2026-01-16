@@ -1,7 +1,7 @@
 const { cmd, commands } = require("../command");
 const axios = require("axios");
 
-// ----- Multi-Reply Smart Waiter (Anime plugin එකේ logic එක) -----
+// ----- Multi-Reply Smart Waiter (Anime plugin logic) -----
 function waitForReply(conn, from, sender, targetId) {
     return new Promise((resolve) => {
         const handler = (update) => {
@@ -12,7 +12,6 @@ function waitForReply(conn, from, sender, targetId) {
             const context = msg.message?.extendedTextMessage?.contextInfo;
             const msgSender = msg.key.participant || msg.key.remoteJid;
             
-            // අපි එවපු ලිස්ට් එකටමද රිප්ලයි කරන්නේ සහ අදාළ යූසර්මද කියලා බලනවා
             const isTargetReply = context?.stanzaId === targetId;
             const isCorrectUser = msgSender.includes(sender.split('@')[0]) || msgSender.includes("@lid");
 
@@ -21,7 +20,6 @@ function waitForReply(conn, from, sender, targetId) {
             }
         };
         conn.ev.on("messages.upsert", handler);
-        // විනාඩි 10ක් යනකම් රිප්ලයි බලාපොරොත්තු වේ
         setTimeout(() => { conn.ev.off("messages.upsert", handler); }, 600000); 
     });
 }
@@ -29,51 +27,49 @@ function waitForReply(conn, from, sender, targetId) {
 cmd({
     pattern: "movie",
     alias: ["movie5"],
-    desc: "Multi-reply internal movie search engine with fixed UI",
+    desc: "Ultimate Multi-reply movie engine with fixed UI",
     category: "downloader",
     react: "🎬",
     filename: __filename,
 }, async (conn, mek, m, { from, q, reply, sender }) => {
     try {
-        if (!q) return reply("❗ කරුණාකර සෙවිය යුතු ෆිල්ම් එකේ නම ලබා දෙන්න.\n\nEx: .movie solo leveling");
+        if (!q) return reply("❗ කරුණාකර සෙවිය යුතු ෆිල්ම් එකේ නම ලබා දෙන්න.");
 
         const posterUrl = "https://files.catbox.moe/d0v6fe.png";
 
-        // ලස්සන UI ලිස්ට් එක
-        let menu = `╭───〔 🎬 *SAYURA MD ALL* 🎬 〕───┈⊷
-│
-│ 🔍 *Search:* _${q.toUpperCase()}_
-│
-│ *Select your movie source:*
-│
-│ 🔷 *01* ┋ Sinhalasub
-│ 🔷 *02* ┋ Cinesubz
-│ 🔷 *03* ┋ Dinka Sinhalasub
-│ 🔷 *04* ┋ SL Anime Club
-│ 🔷 *05* ┋ Pirate.lk
-│ 🔷 *06* ┋ Moviesublk
-│
-│ ╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼
-│ 📌 *අංකය Reply කරන්න. (Multi-Reply ON)*
-│ ╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼
-│
-╰━━━━━━━━━━━━━━━━━━━━━━┈⊷
-         *ᴘᴏᴡᴇරෙඩ් ʙʏ sᴀʏᴜʀᴀ ᴍඩී*`;
+        // --- Premium UI Design ---
+        let menu = `🎬 *𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃 𝐌𝐎𝐕𝐈𝐄 𝐄𝐍𝐆𝐈𝐍𝐄* 🎬
 
-        // පෝස්ටර් එක Image එකක් විදිහටම Caption එකත් එක්ක යැවීම (මෙතනදී අනිවාර්යයෙන්ම පින්තූරය පේනවා)
+   *🔍 සෙවුම:* _${q.toUpperCase()}_
+
+  *Select your movie source below:*
+  
+  ┌──────────────┈⊷
+  │  𝟎𝟏 ┋ *Sinhalasub*
+  │  𝟎𝟐 ┋ *Cinesubz*
+  │  𝟎𝟑 ┋ *Dinka Sinhalasub*
+  │  𝟎𝟒 ┋ *SL Anime Club*
+  │  𝟎𝟓 ┋ *Pirate.lk*
+  │  𝟎𝟔 ┋ *Moviesublk*
+  └──────────────┈⊷
+
+  📌 *අංකය Reply කරන්න.*
+  _(SAYURA MD MOVIE LK)_
+
+  *ᴘᴏᴡᴇʀᴇᴅ ʙʏ sᴀʏᴜʀᴀ ᴍɪʜɪʀᴀɴɢᴀ*`;
+
+        // Image එකක් ලෙස යැවීමෙන් පින්තූරය නොපෙනී යාමේ ගැටලුව ස්ථිරවම විසඳේ.
         const listMsg = await conn.sendMessage(from, { 
             image: { url: posterUrl }, 
             caption: menu 
         }, { quoted: m });
 
-        // --- Multi-Reply Flow එක පාලනය කරන ලූප් එක ---
+        // --- Multi-Reply Flow Control ---
         const startFlow = async () => {
             while (true) {
-                // User ගෙන් රිප්ලයි එකක් එනකන් බලා සිටීම
                 const selection = await waitForReply(conn, from, sender, listMsg.key.id);
                 if (!selection) break;
 
-                // රිප්ලයි එක ලැබුණු පසු අභ්‍යන්තරව trigger කිරීම
                 (async () => {
                     let targetPattern = "";
                     const selText = selection.text;
@@ -86,13 +82,11 @@ cmd({
                     else if (selText === '6') targetPattern = "moviesub";
 
                     if (targetPattern) {
-                        // සෙවුම ආරම්භ කළ බව පෙන්වීමට රිප්ලයි කළ මැසේජ් එකට React කිරීම
                         await conn.sendMessage(from, { react: { text: "🔍", key: selection.msg.key } });
                         
-                        // Bot ගේ memory එකෙන් අදාළ plugin එක සොයාගැනීම
                         const selectedCmd = commands.find((c) => c.pattern === targetPattern);
                         if (selectedCmd) {
-                            // Plugin එක හංගලා Execute කිරීම
+                            // මෙතනදී q: q ලබා දීමෙන් මුල් සෙවුම් නමම පාවිච්චි වේ.
                             await selectedCmd.function(conn, selection.msg, selection.msg, { 
                                 from, 
                                 q: q, 
@@ -101,8 +95,6 @@ cmd({
                                 sender: m.sender, 
                                 pushname: m.pushname 
                             });
-                        } else {
-                            reply(`❌ Plugin '${targetPattern}' සොයාගත නොහැක.`);
                         }
                     }
                 })();
@@ -112,6 +104,6 @@ cmd({
         startFlow();
 
     } catch (e) {
-        console.error("Movie Error:", e);
+        console.error("Movie Engine Error:", e);
     }
 });
