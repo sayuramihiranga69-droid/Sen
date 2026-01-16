@@ -1,8 +1,5 @@
 const { readEnv } = require('../lib/database');
 const { cmd } = require('../command');
-const os = require("os");
-const { getBuffer, getGroupAdmins, getRandom, h2k, isUrl, Json, runtime, sleep, Func, fetchJson } = require('../lib/functions');
-const axios = require('axios');
 const config = require('../config');
 
 cmd({
@@ -24,21 +21,27 @@ async (conn, mek, m, { from, q, isOwner, reply, quoted }) => {
 
         await conn.sendMessage(from, { react: { text: "⏳", key: mek.key } });
 
-        // 3. Forward කිරීමේ ප්‍රධාන කොටස
-        // q = ඉලක්කගත JID එක, m.quoted = reply කරපු මැසේජ් එක
-        await conn.copyNForward(q, m.quoted, true);
+        // 3. පිරිසිදු JID එකක් සකසා ගැනීම
+        let targetJid = q.trim();
+        if (!targetJid.includes('@')) {
+            targetJid = targetJid + "@s.whatsapp.net";
+        }
 
-        // 4. සාර්ථක බව පෙන්වන ලස්සන UI එක
+        // 4. මැසේජ් එක Forward (Copy) කිරීම
+        // මෙතනදී copyNForward පාවිච්චි කිරීමෙන් caption සහ media ඔක්කොම යයි
+        await conn.copyNForward(targetJid, m.quoted, true);
+
+        // 5. සාර්ථක බව පෙන්වන ලස්සන UI එක
         let successMsg = `🚀 *𝐒𝐀𝐘𝐔𝐑𝐀 𝐌𝐃 𝐅𝐎𝐑𝐖𝐀𝐑𝐃𝐄𝐑* 🚀\n\n`;
         successMsg += `📦 *Status:* Successfully Forwarded\n`;
-        successMsg += `🎯 *Target JID:* \`${q}\` \n\n`;
-        successMsg += `*powered by sayura md*`;
+        successMsg += `🎯 *Target JID:* \`${targetJid}\` \n\n`;
+        successMsg += `*ᴘᴏᴡᴇrd ʙʏ sᴀyura ᴍd*`;
 
         await reply(successMsg);
         await conn.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
     } catch (e) {
         console.error("Forward Error:", e);
-        reply("❌ Forward කිරීමේදී දෝෂයක් සිදු විය. කරුණාකර JID එක නිවැරදිදැයි පරීක්ෂා කරන්න.");
+        reply(`❌ *Forward කිරීමේදී දෝෂයක් සිදු විය!* \n\nපොඩ්ඩක් බලන්න ඔයා දුන්න JID එක (\`${q}\`) නිවැරදිද කියලා. LID address වලට (Business IDs) සමහර වෙලාවට මැසේජ් යවන්න බෑ.`);
     }
 });
