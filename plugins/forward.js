@@ -1,62 +1,66 @@
 const { cmd } = require('../command');
 
 cmd({
-    pattern: "jid",
-    desc: "Show full JID information including names and types",
-    category: "other",
-    react: "🔍",
-    filename: __filename
-},
-async (conn, mek, m, { from, quoted, reply, sender, pushname }) => {
+    pattern: "jid4",
+    alias: ["id", "chatid", "gjid"],  
+    desc: "Get full JID of current chat/user (Creator Only)",
+    react: "🆔",
+    category: "utility",
+    filename: __filename,
+}, async (conn, mek, m, { 
+    from, isGroup, isCreator, reply, sender 
+}) => {
     try {
-        const remoteJid = from;
-        const isGroup = m.isGroup;
-        
-        // 1. LID (Business ID) පිරිසිදු කරගැනීමේ Logic එක
-        const cleanJid = (id) => {
-            if (!id) return id;
-            // :1 හෝ @lid තිබේ නම් ඒවා ඉවත් කර @s.whatsapp.net ලබා දීම
-            if (id.includes(':')) return id.split(':')[0] + "@s.whatsapp.net";
-            if (id.includes('@lid')) return id.split('@')[0] + "@s.whatsapp.net";
-            return id;
-        };
-
-        // 2. Sender සහ Bot JID ලබා ගැනීම
-        const senderJid = cleanJid(m.quoted ? m.quoted.sender : sender);
-        const botJid = cleanJid(conn.user.id);
-
-        let groupName = "N/A";
-        let senderDisplayName = m.quoted ? "Quoted User" : pushname;
-
-        // 3. Group එකක් නම් Metadata ලබා ගැනීම
-        if (isGroup) {
-            const metadata = await conn.groupMetadata(remoteJid);
-            groupName = metadata.subject || "Unnamed Group";
+        if (!isCreator) {
+            return reply("❌ *Command Restricted* - Only my creator can use this.");
         }
 
-        // 4. පණිවිඩය සැකසීම
-        const fullText = `🔍 *𝐉𝐈𝐃 𝐅𝐔𝐋𝐋 𝐃𝐄𝐓𝐀𝐈𝐋𝐒*
+        if (isGroup) {
+            // Ensure group JID ends with @g.us
+            const groupJID = from.includes('@g.us') ? from : `${from}@g.us`;
+            return reply(`👥 *Group JID:*\n\`\`\`${groupJID}\`\`\``);
+        } else {
+            // Ensure user JID ends with @s.whatsapp.net
+            const userJID = sender.includes('@s.whatsapp.net') ? sender : `${sender}@s.whatsapp.net`;
+            return reply(`👤 *User JID:*\n\`\`\`${userJID}\`\`\``);
+        }
 
-🏢 *Group Name:* ${isGroup ? groupName : "❌ Not a Group"}
-🆔 *Group JID:* \`${isGroup ? remoteJid : "❌"}\`
-
-👤 *User:* ${senderDisplayName}
-🆔 *User JID:* \`${senderJid}\`
-
-🤖 *Bot JID:* \`${botJid}\`
-
-💬 *Chat Type:* ${isGroup ? "Group Chat" : "Private Chat"}
-🕐 *Message ID:* \`${m.key.id}\`
-
-*ᴘᴏᴡᴇරෙඩ් ʙʏ sᴀයූරා ᴍඩී*`;
-
-        // 5. මැසේජ් එක යැවීම
-        await conn.sendMessage(from, {
-            text: fullText
-        }, { quoted: mek });
-
-    } catch (err) {
-        console.error("Error in .jid command:", err);
-        reply("❌ Error getting JID info!");
+    } catch (e) {
+        console.error("JID Error:", e);
+        reply(`⚠️ Error fetching JID:\n${e.message}`);
     }
+});
+
+
+cmd({
+  pattern: 'jid5',
+  desc: 'Get the WhatsApp JID of a user. Reply to a message or provide a number.',
+  category: 'utility',
+  filename: __filename
+}, async (conn, mek, m, { q, quoted, sender, reply }) => {
+  try {
+    let targetJid;
+    
+    // If replying to a message, get the sender of the quoted message
+    if (m.quoted) {
+      targetJid = m.quoted.sender;
+    } 
+    // Else if an argument is provided, assume it's a number or partial JID
+    else if (q) {
+      let number = q.replace(/[^0-9]/g, ''); // Keep only digits
+      if (!number) {
+        return reply("❌ Please provide a valid number.");
+      }
+      targetJid = number + '@s.whatsapp.net';
+    } 
+    // Otherwise, default to sender's own JID
+    else {
+      targetJid = sender;
+    }
+    
+    await reply(`User JID: ${targetJid}`);
+  } catch (error) {
+    console.error("Error in getjid command:", error);
+    await reply(`❌ Error: ${error}`);
+  }
 });
