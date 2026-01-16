@@ -24,7 +24,7 @@ function waitForReply(conn, from, replyToId, timeout = 120000) {
 }
 
 cmd({
-    pattern: "movie",
+    pattern: "movie5",
     desc: "Main movie search engine menu",
     category: "downloader",
     react: "🎬",
