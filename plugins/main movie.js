@@ -1,11 +1,7 @@
 const { cmd, commands } = require("../command");
+const axios = require("axios");
 
-/**
- * SAYURA MD - MOVIE SEARCH ENGINE (V4)
- * එකම ලිස්ට් එකට කිහිප වතාවක් රිප්ලයි (Multi-reply) කළ හැකි පරිදි සකසා ඇත.
- */
-
-// ----- Multi-Reply Smart Waiter (Handler එක Off කරන්නේ නැත) -----
+// ----- Multi-Reply Smart Waiter (Anime plugin එකේ logic එක) -----
 function waitForReply(conn, from, sender, targetId) {
     return new Promise((resolve) => {
         const handler = (update) => {
@@ -16,7 +12,6 @@ function waitForReply(conn, from, sender, targetId) {
             const context = msg.message?.extendedTextMessage?.contextInfo;
             const msgSender = msg.key.participant || msg.key.remoteJid;
             
-            // අපි එවපු ලිස්ට් එකටමද රිප්ලයි කරන්නේ සහ අදාළ යූසර්මද කියලා බලනවා
             const isTargetReply = context?.stanzaId === targetId;
             const isCorrectUser = msgSender.includes(sender.split('@')[0]) || msgSender.includes("@lid");
 
@@ -25,15 +20,14 @@ function waitForReply(conn, from, sender, targetId) {
             }
         };
         conn.ev.on("messages.upsert", handler);
-        // විනාඩි 10ක් යනකම් රිප්ලයි බලාපොරොත්තු වේ
         setTimeout(() => { conn.ev.off("messages.upsert", handler); }, 600000); 
     });
 }
 
 cmd({
-    pattern: "movie3",
+    pattern: "movie",
     alias: ["movie5"],
-    desc: "Multi-reply internal movie search engine",
+    desc: "Advanced Multi-reply movie search engine",
     category: "downloader",
     react: "🎬",
     filename: __filename,
@@ -41,50 +35,58 @@ cmd({
     try {
         if (!q) return reply("❗ කරුණාකර සෙවිය යුතු ෆිල්ම් එකේ නම ලබා දෙන්න.");
 
+        // --- පෝස්ටර් එක අනිවාර්යයෙන්ම පෙන්වීමට Buffer එකක් ලෙස ගැනීම ---
         const posterUrl = "https://files.catbox.moe/d0v6fe.png";
+        let posterBuffer;
+        try {
+            const res = await axios.get(posterUrl, { responseType: 'arraybuffer' });
+            posterBuffer = Buffer.from(res.data, 'utf-8');
+        } catch (e) {
+            posterBuffer = { url: posterUrl }; // Error එකක් වුණොත් ලින්ක් එකම දෙනවා
+        }
 
-        let menu = `╭━━━〔  🎬 *SAYURA MD ALL MOVIE SEARCH* 🎬  〕━━━┈⊷
-┃
-┃  🔍 *Search:* _${q.toUpperCase()}_
-┃
-┃  *Select your movie source:*
-┃
-┃  🔹 *01* ┋ Sinhalasub
-┃  🔹 *02* ┋ Cinesubz
-┃  🔹 *03* ┋ Dinka Sinhalasub
-┃  🔹 *04* ┋ SL Anime Club
-┃  🔹 *05* ┋ Pirate.lk
-┃  🔹 *06* ┋ Moviesublk
-┃
-┃  *──────────────────────────*
-┃  📌 *අංකය Reply කරන්න. (කිහිපයක් වුවද තේරිය හැක)*
-┃  *──────────────────────────*
-┃
-╰━━━━━━━━━━━━━━━━━━━┈⊷
-         *ᴘᴏᴡᴇʀᴇᴅ ʙʏ sᴀʏᴜʀᴀ ᴍᴅ*`;
+        // --- ලස්සනම පෙනුම (UI Design) ---
+        let menu = `╭───〔 🎬 *SAYURA MD ALL* 🎬 〕───┈⊷
+│
+│ 🔍 *Search:* _${q.toUpperCase()}_
+│
+│ *Select your movie source:*
+│
+│ 🔷 *01* ┋ Sinhalasub
+│ 🔷 *02* ┋ Cinesubz
+│ 🔷 *03* ┋ Dinka Sinhalasub
+│ 🔷 *04* ┋ SL Anime Club
+│ 🔷 *05* ┋ Pirate.lk
+│ 🔷 *06* ┋ Moviesublk
+│
+│ ╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼
+│ 📌 *අංකය Reply කරන්න. (Multi-Reply ON)*
+│ ╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼╼
+│
+╰━━━━━━━━━━━━━━━━━━━━━━┈⊷
+         *ᴘᴏවෙරෙඩ් ʙʏ sᴀʏᴜʀᴀ ᴍඩී*`;
 
         const listMsg = await conn.sendMessage(from, { 
             text: menu,
             contextInfo: {
                 externalAdReply: {
                     title: "SAYURA MD MOVIE ENGINE",
-                    body: "Multi-Source Search Active",
-                    thumbnailUrl: posterUrl,
+                    body: "Searching for: " + q,
+                    thumbnail: posterBuffer, // මෙතන Buffer එක පාවිච්චි කිරීමෙන් Preview එක අනිවාර්යයෙන්ම එයි
                     sourceUrl: "https://whatsapp.com/channel/0029VaoRshX47XeS8fK3uA3p",
                     mediaType: 1,
-                    renderLargerThumbnail: true
+                    renderLargerThumbnail: true,
+                    showAdAttribution: true
                 }
             }
         }, { quoted: m });
 
-        // --- Multi-Reply Loop එක ආරම්භය ---
+        // --- Multi-Reply Loop එක (කිහිප පාරක් අංක ගැහිය හැක) ---
         const startFlow = async () => {
             while (true) {
-                // User ගෙන් රිප්ලයි එකක් එනකන් හැමතිස්සෙම බලන් ඉන්නවා
                 const selection = await waitForReply(conn, from, sender, listMsg.key.id);
                 if (!selection) break;
 
-                // රිප්ලයි එක ලැබුණු පසු අදාළ වැඩේ අභ්‍යන්තරව (async) සිදු කරයි
                 (async () => {
                     let targetPattern = "";
                     const selText = selection.text;
@@ -109,6 +111,8 @@ cmd({
                                 sender: m.sender, 
                                 pushname: m.pushname 
                             });
+                        } else {
+                            reply(`❌ Plugin '${targetPattern}' සොයාගත නොහැක.`);
                         }
                     }
                 })();
@@ -118,6 +122,6 @@ cmd({
         startFlow();
 
     } catch (e) {
-        console.error(e);
+        console.error("Movie Engine Error:", e);
     }
 });
