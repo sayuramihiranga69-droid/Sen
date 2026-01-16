@@ -1,40 +1,49 @@
 const { cmd } = require("../command");
 const axios = require("axios");
 
+// ───────── CONFIGURATION ─────────
 const AC2_FOOTER = "✫☘ 𝐆𝐎𝐉𝐎 𝐌𝐎𝐕𝐈𝐄 𝐇𝐎𝐌𝐄 ☢️☘";
 const API_BASE = "https://sl-anime1.vercel.app/api/handler";
 const GDRIVE_API_KEY = "AIzaSyB7OnWWJpaxzG70ko0aWXKgzjBpb4KZR98";
 
+/**
+ * Multi-Reply Smart Waiter
+ * එකම ලිස්ට් එකට කිහිප වතාවක් රිප්ලයි කිරීමට ඉඩ ලබාදෙයි.
+ */
 function waitForReply(conn, from, sender, targetId) {
     return new Promise((resolve) => {
         const handler = (update) => {
             const msg = update.messages?.[0];
             if (!msg?.message) return;
+
             const text = msg.message.conversation || msg.message?.extendedTextMessage?.text || "";
             const context = msg.message?.extendedTextMessage?.contextInfo;
             const msgSender = msg.key.participant || msg.key.remoteJid;
+            
             const isTargetReply = context?.stanzaId === targetId;
             const isCorrectUser = msgSender.includes(sender.split('@')[0]) || msgSender.includes("@lid");
+
             if (msg.key.remoteJid === from && isCorrectUser && isTargetReply && !isNaN(text)) {
-                conn.ev.off("messages.upsert", handler);
+                // සටහන: මෙතනදී handler එක off කරන්නේ නැත (Multi-reply සඳහා)
                 resolve({ msg, text: text.trim() });
             }
         };
         conn.ev.on("messages.upsert", handler);
-        setTimeout(() => { conn.ev.off("messages.upsert", handler); resolve(null); }, 300000);
+        // විනාඩි 10ක් යනකම් රිප්ලයි බලාපොරොත්තු වේ
+        setTimeout(() => { conn.ev.off("messages.upsert", handler); }, 600000); 
     });
 }
 
 cmd({
     pattern: "anime",
     alias: ["ac2", "movie"],
-    desc: "Direct GDrive API Downloader Fixed",
+    desc: "Ultimate Multi-Reply GDrive Downloader with Ep Name",
     category: "downloader",
     react: "⛩️",
     filename: __filename,
 }, async (conn, mek, m, { from, q, reply, sender }) => {
     try {
-        if (!q) return reply("❗ කරුණාකර නමක් සඳහන් කරන්න.");
+        if (!q) return reply("❗ කරුණාකර ඇනිමේ නමක් සඳහන් කරන්න.");
 
         const searchRes = await axios.get(`${API_BASE}?action=search&query=${encodeURIComponent(q)}`);
         const results = searchRes.data?.data;
@@ -42,8 +51,9 @@ cmd({
 
         let listText = "⛩️ *𝐀𝐍𝐈𝐌𝐄𝐂𝐋𝐔𝐁𝟐 𝐒𝐄𝐀𝐑𝐂𝐇*\n\n";
         results.slice(0, 10).forEach((v, i) => { listText += `*${i + 1}.* ${v.title}\n`; });
-        const sentSearch = await conn.sendMessage(from, { text: listText + `\nඅංකය Reply කරන්න.` }, { quoted: m });
+        const sentSearch = await conn.sendMessage(from, { text: listText + `\nඅංකය Reply කරන්න. (කිහිපයක් වුවද තේරිය හැක)` }, { quoted: m });
 
+        // --- Search List එක පාලනය කරන ලූප් එක ---
         const startSearchFlow = async () => {
             while (true) {
                 const animeSelection = await waitForReply(conn, from, sender, sentSearch.key.id);
@@ -61,65 +71,74 @@ cmd({
                     if (details.episodes && details.episodes.length > 0) {
                         let epText = `📺 *${details.title}*\n\n*Select Episode:*`;
                         details.episodes.forEach((ep, i) => { epText += `\n*${i + 1}.* Episode ${ep.ep_num}`; });
-                        const sentEp = await conn.sendMessage(from, { image: { url: details.image }, caption: epText + `\n\nඑපිසෝඩ් අංකය එවන්න.` }, { quoted: animeSelection.msg });
+                        const sentEp = await conn.sendMessage(from, { image: { url: details.image }, caption: epText + `\n\nඑපිසෝඩ් අංකය එවන්න. (කිහිපයක් වුවද තේරිය හැක)` }, { quoted: animeSelection.msg });
 
+                        // --- Episode List එක පාලනය කරන ලූප් එක ---
                         const startEpFlow = async () => {
                             while (true) {
                                 const epSel = await waitForReply(conn, from, sender, sentEp.key.id);
                                 if (!epSel) break;
-                                const epIdx = parseInt(epSel.text) - 1;
-                                const chosenEp = details.episodes[epIdx];
-                                if (chosenEp) await handleDownload(conn, from, sender, chosenEp.link, details.title, epSel.msg);
+
+                                (async () => {
+                                    const epIdx = parseInt(epSel.text) - 1;
+                                    const chosenEp = details.episodes[epIdx];
+                                    if (chosenEp) {
+                                        await handleDownload(conn, from, sender, chosenEp.link, details.title, epSel.msg, chosenEp.ep_num);
+                                    }
+                                })();
                             }
                         };
                         startEpFlow();
                     } else {
-                        await handleDownload(conn, from, sender, selected.link, details.title, animeSelection.msg);
+                        await handleDownload(conn, from, sender, selected.link, details.title, animeSelection.msg, "Movie");
                     }
                 })();
             }
         };
 
-        async function handleDownload(conn, from, sender, url, title, quotedMsg) {
+        /**
+         * Download Helper
+         */
+        async function handleDownload(conn, from, sender, url, title, quotedMsg, epNum) {
             try {
                 const dlRes = await axios.get(`${API_BASE}?action=download&url=${encodeURIComponent(url)}`);
                 const dlLinks = dlRes.data?.download_links;
                 if (!dlLinks) return;
 
-                let qText = `🎬 *Select Quality:*\n*${title}*`;
+                let qText = `🎬 *Select Quality:*\n*${title}*\n📺 *Episode:* ${epNum}`;
                 dlLinks.forEach((dl, i) => { qText += `\n*${i + 1}.* ${dl.quality}`; });
                 const sentQual = await conn.sendMessage(from, { text: qText + `\n\nQuality අංකය එවන්න.` }, { quoted: quotedMsg });
 
                 const qSel = await waitForReply(conn, from, sender, sentQual.key.id);
                 if (!qSel) return;
-                const chosen = dlLinks[parseInt(qSel.text) - 1];
 
+                const chosen = dlLinks[parseInt(qSel.text) - 1];
                 const driveMatch = chosen.direct_link.match(/(?:drive\.google\.com\/file\/d\/|id=)([\w-]+)/);
-                if (!driveMatch) return reply("❌ GDrive ලින්ක් එකක් හමු නොවීය.");
+                if (!driveMatch) return;
                 
                 const fileId = driveMatch[1];
                 await conn.sendMessage(from, { react: { text: "📥", key: qSel.msg.key } });
 
-                console.log(`[GDRIVE API] Fetching File ID: ${fileId}`);
                 const downloadUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${GDRIVE_API_KEY}`;
-
-                // --- මෙන්න මෙතන වෙනස් කළා (Stream වෙනුවට ArrayBuffer) ---
+                
                 const response = await axios({
                     method: 'get',
                     url: downloadUrl,
-                    responseType: 'arraybuffer' 
+                    responseType: 'arraybuffer'
                 });
 
+                // File නම නිවැරදිව සැකසීම
+                const finalFileName = `${title} - Ep ${epNum} [${chosen.quality}].mp4`;
+
                 await conn.sendMessage(from, {
-                    document: Buffer.from(response.data), // Buffer එකක් ලෙස යැවීම
+                    document: Buffer.from(response.data),
                     mimetype: "video/mp4",
-                    fileName: `${title}_${chosen.quality}.mp4`,
-                    caption: `✅ *Download Complete*\n🎬 *${title}*\n💎 *Quality:* ${chosen.quality}\n\n${AC2_FOOTER}`
+                    fileName: finalFileName,
+                    caption: `✅ *Download Complete*\n\n🎬 *Anime:* ${title}\n📺 *Episode:* ${epNum}\n💎 *Quality:* ${chosen.quality}\n\n${AC2_FOOTER}`
                 }, { quoted: qSel.msg });
 
-            } catch (e) { 
-                console.log(`[DOWNLOAD ERROR]`, e.message);
-                reply("❌ බාගත කිරීමේ දෝෂයකි. (Google API Error: " + e.message + ")");
+            } catch (e) {
+                console.log(e);
             }
         }
 
