@@ -1,7 +1,7 @@
 const { cmd } = require("../command");
 
 cmd({
-    pattern: "movie",
+    pattern: "movie5",
     desc: "Main menu to trigger other movie plugins",
     category: "downloader",
     react: "🎬",
